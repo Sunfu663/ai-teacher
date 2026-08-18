@@ -110,11 +110,24 @@ function initSchema(database: DatabaseSync) {
   // 迁移:为已存在的旧表补充 subject 列(必须在依赖 subject 列的索引之前执行)
   migrateAddSubject(database);
 
+  // 迁移:为 error_records 表补充 reasoning 和 error_step 列(让错题本展示AI识别错误的推理过程与出错步骤)
+  migrateAddReasoningAndErrorStep(database);
+
   // subject 相关索引(迁移完成后再创建,避免旧表无该列时报错)
   database.exec(`
     CREATE INDEX IF NOT EXISTS idx_questions_subject ON questions(subject);
     CREATE INDEX IF NOT EXISTS idx_error_subject ON error_records(subject);
   `);
+}
+
+// 为 error_records 表补充 reasoning(AI推理过程)和 error_step(出错步骤号)列
+function migrateAddReasoningAndErrorStep(database: DatabaseSync) {
+  if (!columnExists(database, 'error_records', 'reasoning')) {
+    database.exec(`ALTER TABLE error_records ADD COLUMN reasoning TEXT`);
+  }
+  if (!columnExists(database, 'error_records', 'error_step')) {
+    database.exec(`ALTER TABLE error_records ADD COLUMN error_step INTEGER`);
+  }
 }
 
 // 检查列是否存在

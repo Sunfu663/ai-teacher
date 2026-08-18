@@ -19,15 +19,17 @@ export function addErrorRecord(
   const now = new Date().toISOString();
 
   const info = db.prepare(`
-    INSERT INTO error_records (student_id, question, student_steps, diagnosis_type, core_error, guidance, knowledge_points, tags, subject, mastery, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 50, ?)
+    INSERT INTO error_records (student_id, question, student_steps, diagnosis_type, error_step, core_error, guidance, reasoning, knowledge_points, tags, subject, mastery, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 50, ?)
   `).run(
     sid,
     question,
     JSON.stringify(studentSteps),
     diagnosis.diagnosisType,
+    diagnosis.errorStep ?? null,
     diagnosis.coreError,
     diagnosis.guidance,
+    diagnosis.reasoning || '',
     JSON.stringify(diagnosis.knowledgePoints),
     JSON.stringify(diagnosis.weakTags),
     subject,
@@ -43,8 +45,10 @@ function rowToRecord(r: any): ErrorRecord {
     question: r.question,
     studentSteps: JSON.parse(r.student_steps),
     diagnosisType: r.diagnosis_type,
+    errorStep: r.error_step != null ? Number(r.error_step) : undefined,
     coreError: r.core_error,
     guidance: r.guidance || '',
+    reasoning: r.reasoning || '',
     knowledgePoints: JSON.parse(r.knowledge_points || '[]'),
     tags: JSON.parse(r.tags || '[]'),
     subject: r.subject as Subject,

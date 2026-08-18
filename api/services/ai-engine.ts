@@ -14,8 +14,21 @@ function getAIConfig() {
   };
 }
 
+// 视觉模型配置(GLM-4V,图片识别专用)
+function getVisionConfig() {
+  return {
+    apiBase: process.env.VISION_API_BASE || 'https://open.bigmodel.cn/api/paas/v4',
+    apiKey: process.env.VISION_API_KEY || '',
+    model: process.env.VISION_MODEL || 'glm-4v-plus',
+  };
+}
+
 export function isAIConfigured(): boolean {
   return !!process.env.AI_API_KEY;
+}
+
+export function isVisionConfigured(): boolean {
+  return !!process.env.VISION_API_KEY;
 }
 
 // 各学科的教师角色配置
@@ -178,6 +191,7 @@ function parseDiagnosis(raw: string): AnalyzeResponse {
     knowledgePoints: Array.isArray(parsed.knowledgePoints) ? parsed.knowledgePoints.map(String) : [],
     weakTags: Array.isArray(parsed.weakTags) ? parsed.weakTags.map(String) : [],
     isCorrect: parsed.diagnosisType === 'correct' || !!parsed.isCorrect,
+    reasoning: String(parsed.reasoning || ''),
   };
 }
 
@@ -263,6 +277,11 @@ export async function analyzeSolution(req: AnalyzeRequest): Promise<AnalyzeRespo
     return mockDiagnosis(req);
   }
 
+  // 图片模式:走 GLM-4V 视觉模型,一次调用同时完成 OCR + 诊断
+  if (req.image && isVisionConfigured()) {
+    return analyzeWithImage(req);
+  }
+
   const systemPrompt = buildSystemPrompt(req.subject);
   const userMessage = buildUserMessage(req);
   const raw = await callLLM(systemPrompt, userMessage);
@@ -278,6 +297,210 @@ export async function analyzeSolution(req: AnalyzeRequest): Promise<AnalyzeRespo
       knowledgePoints: [],
       weakTags: [],
       isCorrect: false,
+      reasoning: raw.slice(0, 500),
     };
+  }
+}
+
+// 图片诊断:GLM-4V 一次性完成 OCR 识别步骤 + 错误诊断
+// 不走两次 API,以保证速度
+async function analyzeWithImage(req: AnalyzeRequest): Promise<AnalyzeResponse> {
+  const config = getVisionConfig();
+  const url = `${config.apiBase.replace(/\/$/, '')}/chat/completions`;
+  const p = SUBJECT_PROFILES[req.subject];
+
+  const systemPrompt = `你是一位经验丰富的${p.role},擅长识别学生手写解题步骤并进行诊断。
+
+【任务分两步,但必须一次性完成,只输出一个JSON】
+1. 先识别图片中学生手写的解题步骤,逐行转换成电子版文本(保留原始计算式和等号,不要修改任何数字)
+2. 再对识别出的步骤进行诊断,指出错误
+
+${subjectVerificationRule(req.subject)}
+
+【输出 JSON 格式,不要输出任何其他内容】
+{
+  "recognizedSteps": ["识别出的第1步原文", "第2步原文", ...],
+  "reasoning": "你的逐步验证过程:先列出关键数值/原子计数,逐一核对,得出结论",
+  "diagnosisType": "stuck|calc_error|logic_error|skip_step|no_idea|correct",
+  "errorStep": 出错步骤序号(整数,从1开始;无错误为null),
+  "coreError": "核心错误点描述;正确则为空字符串",
+  "guidance": "给学生的指导思路,启发式,不给答案",
+  "knowledgePoints": ["${p.subjectName}课本知识点1", "知识点2"],
+  "weakTags": ["薄弱标签1", "标签2"],
+  "isCorrect": true或false
+}`;
+
+  const userText = `【题目】
+${normalizeSubscripts(req.question)}
+
+【学生手写解题步骤图片】
+请先识别图片中的步骤,再诊断。${req.mode === 'guide' ? '学生正在解题中遇到困难,请求思路指导。' : '学生认为自己做完了,请检查是否有错误。'}`;
+
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${config.apiKey}`,
+    },
+    body: JSON.stringify({
+      model: config.model,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: userText },
+            { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${req.image}` } },
+          ],
+        },
+      ],
+      temperature: 0.2,
+      max_tokens: 1500,
+    }),
+  });
+
+  if (!resp.ok) {
+    const errText = await resp.text();
+    throw new Error(`视觉模型接口错误 ${resp.status}: ${errText}`);
+  }
+
+  const data = await resp.json() as any;
+  const raw = data.choices?.[0]?.message?.content || '';
+
+  try {
+    const parsed = parseDiagnosis(raw);
+    // 补上识别出的步骤
+    const recognized = extractRecognizedSteps(raw);
+    return { ...parsed, recognizedSteps: recognized };
+  } catch {
+    return {
+      diagnosisType: 'logic_error',
+      coreError: '图片识别结果解析异常,请重试或换张清晰的图',
+      guidance: raw.slice(0, 500),
+      knowledgePoints: [],
+      weakTags: [],
+      isCorrect: false,
+      reasoning: raw.slice(0, 500),
+      recognizedSteps: [],
+    };
+  }
+}
+
+// 从 AI 返回 JSON 里提取 recognizedSteps 数组
+function extractRecognizedSteps(raw: string): string[] {
+  try {
+    let text = raw.trim();
+    if (text.startsWith('```')) {
+      text = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+    }
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (jsonMatch) text = jsonMatch[0];
+    const parsed = JSON.parse(text);
+    return Array.isArray(parsed.recognizedSteps) ? parsed.recognizedSteps.map(String).filter(s => s) : [];
+  } catch {
+    return [];
+  }
+}
+
+// 学科验证规则(图片模式专用)
+function subjectVerificationRule(subject: Subject): string {
+  if (subject === 'chemistry') {
+    return `【化学方程式验证规则】
+- 化学方程式配平:逐一数清左右两边每种元素原子个数(系数乘下标,2O2=4氧,3Fe=3铁,Fe3O4=3铁+4氧)
+- 原子数相等即正确配平,必须判 correct
+- 宁可漏判错误,不可误判正确为错误`;
+  }
+  if (subject === 'math') {
+    return `【数学验证规则】
+- 逐步验算每一步计算结果(3+5=8不是9,2x=8则x=4)
+- 计算正确就不能判错,不确定时倾向判正确`;
+  }
+  return `【物理验证规则】
+- 核对公式是否正确、单位是否统一、代入和计算结果是否准确
+- 确实有错才判错,不确定时倾向判正确`;
+}
+
+// 每日十题图片判分:GLM-4V 一次性识别学生写在图片里的答案并判对错
+// 只返回识别的答案文本 + 对错,不做完整诊断(比 analyzeWithImage 轻量,速度更快)
+export async function ocrCheckAnswer(opts: {
+  image: string;
+  question: string;
+  correctAnswer: string;
+  subject: Subject;
+}): Promise<{ recognizedAnswer: string; isCorrect: boolean }> {
+  const config = getVisionConfig();
+  const url = `${config.apiBase.replace(/\/$/, '')}/chat/completions`;
+
+  const systemPrompt = `你是一位阅卷老师。学生会拍一张手写答案的照片,你需要:
+1. 识别图片中学生的手写答案,转换成电子版文本
+2. 与正确答案比对,判断对错
+
+【判分规则】
+- 选择题:学生答案的首字母与正确答案首字母一致即对
+- 数字/短答案:严格相等(4不等于44,2H2O不等于H2O)
+- 方程式/长答案:化学方程式需检查配平(原子守恒);其他答案允许表述不同但含义一致
+- 数学计算题:数值结果正确即对,过程不评判
+- 不确定时倾向判对
+
+【输出 JSON,不要任何其他内容】
+{
+  "recognizedAnswer": "识别出的学生答案原文",
+  "isCorrect": true或false
+}`;
+
+  const userText = `【题目】
+${normalizeSubscripts(opts.question)}
+
+【正确答案】
+${normalizeSubscripts(opts.correctAnswer)}
+
+【学生手写答案图片】
+请识别并判分。`;
+
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${config.apiKey}`,
+    },
+    body: JSON.stringify({
+      model: config.model,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: userText },
+            { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${opts.image}` } },
+          ],
+        },
+      ],
+      temperature: 0.1,
+      max_tokens: 400,
+    }),
+  });
+
+  if (!resp.ok) {
+    const errText = await resp.text();
+    throw new Error(`视觉模型接口错误 ${resp.status}: ${errText}`);
+  }
+
+  const data = await resp.json() as any;
+  const raw = data.choices?.[0]?.message?.content || '';
+
+  try {
+    let text = raw.trim();
+    if (text.startsWith('```')) {
+      text = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+    }
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (jsonMatch) text = jsonMatch[0];
+    const parsed = JSON.parse(text);
+    return {
+      recognizedAnswer: String(parsed.recognizedAnswer || ''),
+      isCorrect: !!parsed.isCorrect,
+    };
+  } catch {
+    return { recognizedAnswer: '', isCorrect: false };
   }
 }

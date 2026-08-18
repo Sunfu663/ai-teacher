@@ -16,6 +16,12 @@ services:
         value: deepseek-chat
       - key: AI_API_KEY
         sync: false
+      - key: VISION_API_BASE
+        value: https://open.bigmodel.cn/api/paas/v4
+      - key: VISION_MODEL
+        value: glm-4v-plus
+      - key: VISION_API_KEY
+        sync: false
       - key: DB_PATH
         value: ./data/app.db
       - key: PORT

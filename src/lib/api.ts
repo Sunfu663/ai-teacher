@@ -34,11 +34,12 @@ function qs(params: Record<string, string | number | undefined>): string {
   return '?' + entries.map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`).join('&');
 }
 
-// AI 诊断
+// AI 诊断(支持文本步骤或图片,req.image 传 base64 字符串时走视觉模型)
 export async function analyzeSolution(req: AnalyzeRequest): Promise<{
   diagnosis: AnalyzeResponse;
   errorRecord: ErrorRecord | null;
   aiEnabled: boolean;
+  visionEnabled?: boolean;
 }> {
   return request('/api/analyze', {
     method: 'POST',
@@ -84,6 +85,19 @@ export async function submitDaily(subject: Subject, results: DailyResult[]): Pro
   return request('/api/daily/submit', {
     method: 'POST',
     body: JSON.stringify({ results, subject }),
+  });
+}
+
+// 每日十题拍照判分:图片+题目+正确答案 -> 识别答案+对错(一次GLM-4V调用)
+export async function ocrCheckAnswer(opts: {
+  image: string;
+  question: string;
+  correctAnswer: string;
+  subject: Subject;
+}): Promise<{ recognizedAnswer: string; isCorrect: boolean }> {
+  return request('/api/daily/ocr-check', {
+    method: 'POST',
+    body: JSON.stringify(opts),
   });
 }
 

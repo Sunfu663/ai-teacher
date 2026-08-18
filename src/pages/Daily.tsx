@@ -1,11 +1,11 @@
-import { useEffect, useState } from "react";
-import { generateDaily, submitDaily } from "@/lib/api";
+import { useEffect, useState, useRef } from "react";
+import { generateDaily, submitDaily, ocrCheckAnswer } from "@/lib/api";
 import SubjectSwitcher from "@/components/SubjectSwitcher";
 import { useSubjectStore } from "@/store/subject";
 import { SUBJECT_LABELS } from "@/types";
 import type { Question, DailyReport } from "@/types";
 import { cn } from "@/lib/utils";
-import { CalendarCheck, Loader2, Check, X, Trophy, TrendingUp, TrendingDown, RotateCcw } from "lucide-react";
+import { CalendarCheck, Loader2, Check, X, Trophy, TrendingUp, TrendingDown, RotateCcw, Camera, Image as ImageIcon } from "lucide-react";
 
 export default function Daily() {
   const { subject } = useSubjectStore();
@@ -14,13 +14,22 @@ export default function Daily() {
   const [current, setCurrent] = useState(0);
   const [answers, setAnswers] = useState<Record<number, string>>({});
   const [revealed, setRevealed] = useState<Record<number, boolean>>({});
+  // 图片判分模式:用 GLM-4V 直接判对错,绕过前端 checkAnswer
+  const [imageChecked, setImageChecked] = useState<Record<number, boolean>>({});
   const [report, setReport] = useState<DailyReport | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  // 拍照相关
+  const [ocrLoading, setOcrLoading] = useState(false);
+  const [imagePreview, setImagePreview] = useState<Record<number, string>>({});
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setLoading(true);
     setAnswers({});
     setRevealed({});
+    setImageChecked({});
+    setImagePreview({});
     setReport(null);
     setCurrent(0);
     generateDaily(subject, 10)
@@ -34,24 +43,73 @@ export default function Daily() {
     const normalized = answer.trim().replace(/\s/g, "").toLowerCase();
     const correctNorm = correct.trim().replace(/\s/g, "").toLowerCase();
     if (!normalized) return false;
-    // 完全匹配
     if (normalized === correctNorm) return true;
-    // 选择题: answer 可能是单字母 "C", 用户点选存的是完整选项 "C. 蜡烛燃烧"
-    // 提取用户选项首字母与 answer 比较
     if (correctNorm.length === 1 && /^[a-z]$/.test(correctNorm)) {
       return normalized.charAt(0) === correctNorm;
     }
-    // 数字/短答案(<=4字符或纯数字): 必须严格相等
-    // 避免 "4" 匹配 "44"、"2" 匹配 "2H₂O" 这类误判
     if (correctNorm.length <= 4 || /^\d+(\.\d+)?%?$/.test(correctNorm)) {
       return false;
     }
-    // 长答案(方程式/句子): 允许包含匹配,但用户答案长度不能过短
-    // 要求至少达到正确答案长度的 60%,避免输入片段就判对
     if (normalized.length >= correctNorm.length * 0.6) {
       return correctNorm.includes(normalized) || normalized.includes(correctNorm);
     }
     return false;
+  };
+
+  // 图片压缩(与 Solve 页一致,1280px / JPEG 0.7)
+  const compressImage = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = e => {
+        const img = new Image();
+        img.onload = () => {
+          const MAX_WIDTH = 1280;
+          let { width, height } = img;
+          if (width > MAX_WIDTH) {
+            height = Math.round(height * (MAX_WIDTH / width));
+            width = MAX_WIDTH;
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) { reject(new Error('canvas 不可用')); return; }
+          ctx.drawImage(img, 0, 0, width, height);
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+          resolve(dataUrl.split(',')[1]);
+        };
+        img.onerror = () => reject(new Error('图片加载失败'));
+        img.src = e.target?.result as string;
+      };
+      reader.onerror = () => reject(new Error('文件读取失败'));
+      reader.readAsDataURL(file);
+    });
+  };
+
+  // 拍照判分:一次 GLM-4V 调用完成 OCR + 判对错
+  const handleImageCheck = async (file: File | undefined) => {
+    if (!file || !q) return;
+    if (!file.type.startsWith('image/')) return;
+    setOcrLoading(true);
+    try {
+      const base64 = await compressImage(file);
+      setImagePreview({ ...imagePreview, [q.id]: `data:image/jpeg;base64,${base64}` });
+      const result = await ocrCheckAnswer({
+        image: base64,
+        question: q.content,
+        correctAnswer: q.answer,
+        subject,
+      });
+      // 把识别出的答案填入答案框,标记为图片判分模式
+      setAnswers({ ...answers, [q.id]: result.recognizedAnswer || "(图片未识别出答案)" });
+      setImageChecked({ ...imageChecked, [q.id]: result.isCorrect });
+      setRevealed({ ...revealed, [q.id]: true });
+    } catch (err: any) {
+      console.error(err);
+      alert("图片判分失败: " + err.message);
+    } finally {
+      setOcrLoading(false);
+    }
   };
 
   const handleReveal = () => {
@@ -69,11 +127,18 @@ export default function Daily() {
 
   const handleSubmit = async () => {
     setSubmitting(true);
-    const results = questions.map(qq => ({
-      questionId: qq.id,
-      correct: checkAnswer(qq.id, answers[qq.id] || "", qq.answer),
-      userAnswer: answers[qq.id] || "",
-    }));
+    const results = questions.map(qq => {
+      // 图片判分的题用 AI 判定的结果,其他用前端 checkAnswer
+      const usedImage = imageChecked[qq.id] !== undefined;
+      const correct = usedImage
+        ? imageChecked[qq.id]
+        : checkAnswer(qq.id, answers[qq.id] || "", qq.answer);
+      return {
+        questionId: qq.id,
+        correct,
+        userAnswer: answers[qq.id] || "",
+      };
+    });
     try {
       const r = await submitDaily(subject, results);
       setReport(r);
@@ -88,6 +153,8 @@ export default function Daily() {
     setLoading(true);
     setAnswers({});
     setRevealed({});
+    setImageChecked({});
+    setImagePreview({});
     setReport(null);
     setCurrent(0);
     generateDaily(subject, 10).then(qs => { setQuestions(qs); setLoading(false); });
@@ -126,7 +193,6 @@ export default function Daily() {
           <p className="text-sm text-ink-400">正确率 {correctRate}%</p>
         </div>
 
-        {/* 标签权重变化 */}
         {report.tagChanges.length > 0 && (
           <div className="rounded-2xl bg-paper-50 border border-ink-100 p-4">
             <h3 className="text-sm font-semibold text-ink-700 mb-3">薄弱标签变化</h3>
@@ -170,7 +236,11 @@ export default function Daily() {
   // 答题中
   if (!q) return null;
   const isRevealed = revealed[q.id];
-  const isCorrect = checkAnswer(q.id, answers[q.id] || "", q.answer);
+  // 图片判分的题用 imageChecked 的结果,其他用 checkAnswer
+  const usedImageCheck = imageChecked[q.id] !== undefined;
+  const isCorrect = usedImageCheck
+    ? imageChecked[q.id]
+    : checkAnswer(q.id, answers[q.id] || "", q.answer);
 
   return (
     <div className="px-5 pt-12 pb-6 space-y-5">
@@ -225,14 +295,40 @@ export default function Daily() {
 
         {/* 填空/解答题 */}
         {q.type !== "choice" && (
-          <textarea
-            value={answers[q.id] || ""}
-            onChange={e => setAnswers({ ...answers, [q.id]: e.target.value })}
-            disabled={isRevealed}
-            placeholder="写出你的答案..."
-            className="w-full rounded-xl border border-ink-100 px-4 py-3 text-sm text-ink-700 placeholder:text-ink-200 resize-none focus:border-ink-400"
-            rows={q.type === "fill" ? 1 : 3}
-          />
+          <>
+            <textarea
+              value={answers[q.id] || ""}
+              onChange={e => setAnswers({ ...answers, [q.id]: e.target.value })}
+              disabled={isRevealed}
+              placeholder="写出你的答案,或点击下方拍照让AI识别..."
+              className="w-full rounded-xl border border-ink-100 px-4 py-3 text-sm text-ink-700 placeholder:text-ink-200 resize-none focus:border-ink-400"
+              rows={q.type === "fill" ? 1 : 3}
+            />
+            {/* 拍照按钮(未提交时显示) */}
+            {!isRevealed && (
+              <div className="mt-2 flex gap-2">
+                <button
+                  onClick={() => cameraInputRef.current?.click()}
+                  disabled={ocrLoading}
+                  className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-pill bg-ink-50 text-ink-600 hover:bg-ink-100 text-xs font-medium transition-colors disabled:opacity-50"
+                >
+                  {ocrLoading ? <Loader2 size={14} className="animate-spin" /> : <Camera size={14} />}
+                  {ocrLoading ? "AI识别中..." : "拍照判分"}
+                </button>
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={ocrLoading}
+                  className="flex items-center justify-center gap-1.5 py-2 px-3 rounded-pill bg-ink-50 text-ink-600 hover:bg-ink-100 text-xs font-medium transition-colors disabled:opacity-50"
+                >
+                  <ImageIcon size={14} />
+                </button>
+              </div>
+            )}
+            {/* 已拍照的图片预览 */}
+            {imagePreview[q.id] && (
+              <img src={imagePreview[q.id]} alt="我的答案" className="mt-2 w-full max-h-48 object-contain rounded-lg border border-ink-100 bg-white" />
+            )}
+          </>
         )}
 
         {/* 揭示答案 */}
@@ -242,9 +338,10 @@ export default function Daily() {
             isCorrect ? "bg-sage-50" : "bg-pen-50"
           )}>
             {isCorrect ? <Check size={18} className="text-sage-500 mt-0.5" /> : <X size={18} className="text-pen-500 mt-0.5" />}
-            <div>
+            <div className="flex-1">
               <p className={cn("text-sm font-semibold", isCorrect ? "text-sage-700" : "text-pen-700")}>
                 {isCorrect ? "回答正确！" : "回答错误"}
+                {usedImageCheck && <span className="ml-1 text-xs font-normal text-ink-400">(AI图片判分)</span>}
               </p>
               {!isCorrect && (
                 <p className="text-sm text-ink-600 mt-0.5">正确答案：<span className="font-mono font-medium">{q.answer}</span></p>
@@ -259,7 +356,7 @@ export default function Daily() {
         {!isRevealed ? (
           <button
             onClick={handleReveal}
-            disabled={!answers[q.id]?.trim()}
+            disabled={!answers[q.id]?.trim() || ocrLoading}
             className="flex-1 rounded-pill bg-ink-700 text-white py-3 text-sm font-semibold disabled:opacity-40 hover:bg-ink-600 transition-colors"
           >
             提交答案
@@ -275,6 +372,23 @@ export default function Daily() {
           </button>
         )}
       </div>
+
+      {/* 隐藏的文件输入 */}
+      <input
+        ref={cameraInputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        className="hidden"
+        onChange={e => handleImageCheck(e.target.files?.[0])}
+      />
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={e => handleImageCheck(e.target.files?.[0])}
+      />
     </div>
   );
 }
