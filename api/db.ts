@@ -10,7 +10,14 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const DB_PATH = process.env.DB_PATH || path.join(__dirname, '..', 'data', 'app.db');
+// Vercel 无服务器环境下,数据库必须放在 /tmp 目录(唯一可写位置)
+// 本地开发时仍使用项目目录下的 data/app.db
+const isVercel = !!process.env.VERCEL;
+const DB_PATH = process.env.DB_PATH || (
+  isVercel
+    ? '/tmp/ai-teacher.db'
+    : path.join(__dirname, '..', 'data', 'app.db')
+);
 
 let db: DatabaseSync;
 
