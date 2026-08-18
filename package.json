@@ -3,6 +3,9 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "engines": {
+    "node": ">=22.0.0"
+  },
   "scripts": {
     "client:dev": "vite",
     "build": "tsc -b && vite build",
@@ -11,8 +14,8 @@
     "check": "tsc --noEmit",
     "server:dev": "nodemon",
     "dev": "concurrently \"npm run client:dev\" \"npm run server:dev\"",
-    "server:start": "tsx api/server.ts",
-    "start": "tsx api/server.ts"
+    "server:start": "tsx server/server.ts",
+    "start": "tsx server/server.ts"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.0",

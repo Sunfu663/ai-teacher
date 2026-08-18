@@ -3,7 +3,7 @@
  * 把 Express 应用包装成 Vercel 函数
  */
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import app from './app.js';
+import app from '../server/app.js';
 
 // Vercel 函数需要默认导出一个 handler
 export default async function handler(req: VercelRequest, res: VercelResponse) {
