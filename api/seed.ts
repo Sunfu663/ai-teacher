@@ -1,0 +1,497 @@
+/**
+ * 种子数据 - 初中数学/物理/化学三科题库
+ * 首次启动时自动写入
+ */
+import { getDb, transaction } from './db.js';
+import type { Subject } from '../shared/types.js';
+
+interface SeedQuestion {
+  content: string;
+  answer: string;
+  type: 'choice' | 'fill' | 'solve';
+  options?: string[];
+  knowledgePoints: string[];
+  tags: string[];
+  chapter: string;
+  grade: number;
+  subject: Subject;
+}
+
+const SEED_QUESTIONS: SeedQuestion[] = [
+  // ============================================================
+  // 数学 (math)
+  // ============================================================
+  {
+    content: '解方程：3x - 7 = 2x + 5',
+    answer: 'x = 12',
+    type: 'solve',
+    knowledgePoints: ['一元一次方程', '移项'],
+    tags: ['移项变号', '合并同类项'],
+    chapter: '一元一次方程',
+    grade: 7,
+    subject: 'math',
+  },
+  {
+    content: '解方程：2(x - 3) = 4 - (x + 1)',
+    answer: 'x = 11/3',
+    type: 'solve',
+    knowledgePoints: ['一元一次方程', '去括号', '去分母'],
+    tags: ['去括号', '符号运算'],
+    chapter: '一元一次方程',
+    grade: 7,
+    subject: 'math',
+  },
+  {
+    content: '解方程：(x + 1)/2 - (2x - 1)/3 = 1',
+    answer: 'x = -1',
+    type: 'solve',
+    knowledgePoints: ['一元一次方程', '去分母'],
+    tags: ['去分母', '符号运算'],
+    chapter: '一元一次方程',
+    grade: 7,
+    subject: 'math',
+  },
+  {
+    content: '一个数的 3 倍加上 5 等于这个数的 2 倍减去 3，求这个数。',
+    answer: 'x = -8',
+    type: 'solve',
+    knowledgePoints: ['一元一次方程', '列方程'],
+    tags: ['审题', '列方程'],
+    chapter: '一元一次方程',
+    grade: 7,
+    subject: 'math',
+  },
+  {
+    content: '化简：3(2a - b) - 2(a + 3b)',
+    answer: '4a - 9b',
+    type: 'solve',
+    knowledgePoints: ['整式的加减', '去括号', '合并同类项'],
+    tags: ['去括号', '符号运算', '合并同类项'],
+    chapter: '整式的加减',
+    grade: 7,
+    subject: 'math',
+  },
+  {
+    content: '先化简，再求值：2x² - 3x + 1 - (x² - 2x + 3)，其中 x = -2',
+    answer: 'x² - x - 2 = 4',
+    type: 'solve',
+    knowledgePoints: ['整式的加减', '求值'],
+    tags: ['去括号', '符号运算', '代入求值'],
+    chapter: '整式的加减',
+    grade: 7,
+    subject: 'math',
+  },
+  {
+    content: '计算：(2x + 1)(2x - 1) - (x - 2)²',
+    answer: '3x² + 4x - 5',
+    type: 'solve',
+    knowledgePoints: ['整式的乘除', '平方差公式', '完全平方公式'],
+    tags: ['乘法公式', '符号运算'],
+    chapter: '整式的乘除',
+    grade: 8,
+    subject: 'math',
+  },
+  {
+    content: '因式分解：x² - 5x + 6',
+    answer: '(x - 2)(x - 3)',
+    type: 'solve',
+    knowledgePoints: ['因式分解', '十字相乘法'],
+    tags: ['因式分解', '十字相乘'],
+    chapter: '因式分解',
+    grade: 8,
+    subject: 'math',
+  },
+  {
+    content: '因式分解：2a² - 8',
+    answer: '2(a + 2)(a - 2)',
+    type: 'solve',
+    knowledgePoints: ['因式分解', '提公因式法', '平方差公式'],
+    tags: ['因式分解', '提公因式'],
+    chapter: '因式分解',
+    grade: 8,
+    subject: 'math',
+  },
+  {
+    content: '在直角三角形中，两直角边长分别为 3 和 4，求斜边长。',
+    answer: '5',
+    type: 'fill',
+    knowledgePoints: ['勾股定理'],
+    tags: ['勾股定理', '计算'],
+    chapter: '勾股定理',
+    grade: 8,
+    subject: 'math',
+  },
+  {
+    content: '一个直角三角形的两边长分别为 6 和 8，求第三边的长。',
+    answer: '10 或 2√7',
+    type: 'solve',
+    knowledgePoints: ['勾股定理', '分类讨论'],
+    tags: ['勾股定理', '分类讨论'],
+    chapter: '勾股定理',
+    grade: 8,
+    subject: 'math',
+  },
+  {
+    content: '已知一次函数 y = kx + b 的图象经过点 (1, 3) 和 (-1, -1)，求 k 和 b 的值。',
+    answer: 'k = 2, b = 1',
+    type: 'solve',
+    knowledgePoints: ['一次函数', '待定系数法'],
+    tags: ['待定系数法', '方程组'],
+    chapter: '一次函数',
+    grade: 8,
+    subject: 'math',
+  },
+  {
+    content: '下列函数中，y 随 x 的增大而减小的是？',
+    answer: 'C',
+    type: 'choice',
+    options: ['A. y = 3x + 1', 'B. y = 2x', 'C. y = -x + 5', 'D. y = x²'],
+    knowledgePoints: ['一次函数', '增减性'],
+    tags: ['函数性质', '增减性'],
+    chapter: '一次函数',
+    grade: 8,
+    subject: 'math',
+  },
+  {
+    content: '解方程：x² - 5x + 6 = 0',
+    answer: 'x₁ = 2, x₂ = 3',
+    type: 'solve',
+    knowledgePoints: ['一元二次方程', '因式分解法'],
+    tags: ['因式分解', '解方程'],
+    chapter: '一元二次方程',
+    grade: 9,
+    subject: 'math',
+  },
+  {
+    content: '用公式法解方程：x² - 6x + 4 = 0',
+    answer: 'x = 3 ± √5',
+    type: 'solve',
+    knowledgePoints: ['一元二次方程', '公式法', '判别式'],
+    tags: ['求根公式', '根的判别式'],
+    chapter: '一元二次方程',
+    grade: 9,
+    subject: 'math',
+  },
+  {
+    content: '某商品原价 200 元，连续两次降价后售价为 162 元，求每次降价的百分率。',
+    answer: '10%',
+    type: 'solve',
+    knowledgePoints: ['一元二次方程', '应用题'],
+    tags: ['审题', '列方程', '应用题'],
+    chapter: '一元二次方程',
+    grade: 9,
+    subject: 'math',
+  },
+  {
+    content: '求二次函数 y = x² - 4x + 3 的顶点坐标和对称轴。',
+    answer: '顶点 (2, -1)，对称轴 x = 2',
+    type: 'solve',
+    knowledgePoints: ['二次函数', '配方法', '顶点坐标'],
+    tags: ['配方法', '顶点坐标'],
+    chapter: '二次函数',
+    grade: 9,
+    subject: 'math',
+  },
+  {
+    content: '抛物线 y = 2(x - 1)² + 3 的开口方向、对称轴和顶点坐标分别是？',
+    answer: '开口向上，对称轴 x = 1，顶点 (1, 3)',
+    type: 'solve',
+    knowledgePoints: ['二次函数', '顶点式'],
+    tags: ['顶点式', '函数性质'],
+    chapter: '二次函数',
+    grade: 9,
+    subject: 'math',
+  },
+  {
+    content: '已知关于 x 的方程 x² - (m + 1)x + m = 0，求证：无论 m 取何值，方程总有实数根。',
+    answer: 'Δ = (m+1)² - 4m = (m-1)² ≥ 0，总有实数根',
+    type: 'solve',
+    knowledgePoints: ['一元二次方程', '根的判别式', '完全平方公式'],
+    tags: ['判别式', '完全平方', '逻辑推理'],
+    chapter: '一元二次方程',
+    grade: 9,
+    subject: 'math',
+  },
+
+  // ============================================================
+  // 物理 (physics)
+  // ============================================================
+  {
+    content: '一个物体的质量为 5 kg，求它受到的重力（g 取 10 N/kg）。',
+    answer: '50 N',
+    type: 'solve',
+    knowledgePoints: ['重力', 'G = mg'],
+    tags: ['公式应用', '单位换算'],
+    chapter: '力',
+    grade: 8,
+    subject: 'physics',
+  },
+  {
+    content: '某同学重 500 N，站立时双脚与地面接触面积为 0.04 m²，求他对地面的压强。',
+    answer: '12500 Pa',
+    type: 'solve',
+    knowledgePoints: ['压强', 'p = F/S'],
+    tags: ['公式应用', '受力面积', '单位换算'],
+    chapter: '压强',
+    grade: 8,
+    subject: 'physics',
+  },
+  {
+    content: '将一物体放入水中，排开水的体积为 2 × 10⁻³ m³，求它受到的浮力（ρ水 = 1×10³ kg/m³，g = 10 N/kg）。',
+    answer: '20 N',
+    type: 'solve',
+    knowledgePoints: ['浮力', '阿基米德原理', 'F浮 = ρgV排'],
+    tags: ['公式应用', '浮力计算', '单位换算'],
+    chapter: '浮力',
+    grade: 8,
+    subject: 'physics',
+  },
+  {
+    content: '汽车以 20 m/s 的速度匀速行驶了 5 min，求汽车通过的路程。',
+    answer: '6000 m',
+    type: 'solve',
+    knowledgePoints: ['机械运动', 's = vt'],
+    tags: ['公式应用', '单位换算'],
+    chapter: '机械运动',
+    grade: 8,
+    subject: 'physics',
+  },
+  {
+    content: '一段导体两端的电压为 6 V，通过它的电流为 0.3 A，求这段导体的电阻。',
+    answer: '20 Ω',
+    type: 'solve',
+    knowledgePoints: ['欧姆定律', 'I = U/R'],
+    tags: ['公式应用', '欧姆定律'],
+    chapter: '欧姆定律',
+    grade: 9,
+    subject: 'physics',
+  },
+  {
+    content: '一个定值电阻 R = 10 Ω，通过的电流为 0.5 A，通电 10 s，求电流做的功。',
+    answer: '25 J',
+    type: 'solve',
+    knowledgePoints: ['电功', 'W = I²Rt'],
+    tags: ['公式应用', '电功计算'],
+    chapter: '电功率',
+    grade: 9,
+    subject: 'physics',
+  },
+  {
+    content: '一个电热器接在 220 V 的电路中，通过的电流为 2 A，求该电热器的电功率。',
+    answer: '440 W',
+    type: 'solve',
+    knowledgePoints: ['电功率', 'P = UI'],
+    tags: ['公式应用', '电功率计算'],
+    chapter: '电功率',
+    grade: 9,
+    subject: 'physics',
+  },
+  {
+    content: '质量为 2 kg 的水，温度从 20 ℃ 升高到 70 ℃，求水吸收的热量[c水 = 4.2×10³ J/(kg·℃)]。',
+    answer: '4.2×10⁵ J',
+    type: 'solve',
+    knowledgePoints: ['比热容', 'Q吸 = cm(t-t₀)'],
+    tags: ['公式应用', '热量计算', '单位换算'],
+    chapter: '内能',
+    grade: 9,
+    subject: 'physics',
+  },
+  {
+    content: '光线从空气斜射入水中，下列说法正确的是？',
+    answer: 'B',
+    type: 'choice',
+    options: ['A. 折射角等于入射角', 'B. 折射角小于入射角', 'C. 折射角大于入射角', 'D. 光沿直线传播'],
+    knowledgePoints: ['光的折射', '折射规律'],
+    tags: ['折射规律', '概念理解'],
+    chapter: '光现象',
+    grade: 8,
+    subject: 'physics',
+  },
+  {
+    content: '某凸透镜焦距为 10 cm，将物体放在距透镜 25 cm 处，光屏上成什么样的像？',
+    answer: '倒立、缩小的实像',
+    type: 'fill',
+    knowledgePoints: ['凸透镜成像', '成像规律'],
+    tags: ['成像规律', '物距判断'],
+    chapter: '透镜及其应用',
+    grade: 8,
+    subject: 'physics',
+  },
+  {
+    content: '一个人用力推一个静止的箱子，箱子没动，此时推力和什么力是一对平衡力？',
+    answer: '摩擦力',
+    type: 'fill',
+    knowledgePoints: ['二力平衡', '平衡力'],
+    tags: ['受力分析', '平衡条件'],
+    chapter: '运动和力',
+    grade: 8,
+    subject: 'physics',
+  },
+  {
+    content: '杠杆的动力臂为 0.4 m，阻力臂为 0.1 m，阻力为 50 N，求动力。',
+    answer: '12.5 N',
+    type: 'solve',
+    knowledgePoints: ['简单机械', '杠杆平衡条件', 'F1L1 = F2L2'],
+    tags: ['公式应用', '杠杆平衡'],
+    chapter: '简单机械',
+    grade: 8,
+    subject: 'physics',
+  },
+
+  // ============================================================
+  // 化学 (chemistry)
+  // ============================================================
+  {
+    content: '下列变化属于化学变化的是？',
+    answer: 'C',
+    type: 'choice',
+    options: ['A. 冰融化成水', 'B. 汽油挥发', 'C. 蜡烛燃烧', 'D. 玻璃破碎'],
+    knowledgePoints: ['物质的变化', '物理变化与化学变化'],
+    tags: ['概念辨析', '变化判断'],
+    chapter: '走进化学世界',
+    grade: 9,
+    subject: 'chemistry',
+  },
+  {
+    content: '配平化学方程式：H₂ + O₂ → H₂O',
+    answer: '2H₂ + O₂ = 2H₂O',
+    type: 'solve',
+    knowledgePoints: ['化学方程式', '配平'],
+    tags: ['化学方程式配平', '原子守恒'],
+    chapter: '化学方程式',
+    grade: 9,
+    subject: 'chemistry',
+  },
+  {
+    content: '配平化学方程式：Fe + O₂ → Fe₃O₄',
+    answer: '3Fe + 2O₂ = Fe₃O₄',
+    type: 'solve',
+    knowledgePoints: ['化学方程式', '配平'],
+    tags: ['化学方程式配平', '原子守恒'],
+    chapter: '化学方程式',
+    grade: 9,
+    subject: 'chemistry',
+  },
+  {
+    content: '实验室用高锰酸钾制取氧气，请写出化学方程式。',
+    answer: '2KMnO₄ = K₂MnO₄ + MnO₂ + O₂↑（加热条件）',
+    type: 'solve',
+    knowledgePoints: ['氧气的制取', '化学方程式书写'],
+    tags: ['方程式书写', '条件标注'],
+    chapter: '氧气',
+    grade: 9,
+    subject: 'chemistry',
+  },
+  {
+    content: '计算二氧化碳（CO₂）的相对分子质量（C=12，O=16）。',
+    answer: '44',
+    type: 'solve',
+    knowledgePoints: ['相对分子质量', '化学式计算'],
+    tags: ['化学式计算', '相对原子质量'],
+    chapter: '化学式与化合价',
+    grade: 9,
+    subject: 'chemistry',
+  },
+  {
+    content: '水（H₂O）中氢元素的质量分数是多少？（H=1，O=16，结果保留一位小数）',
+    answer: '11.1%',
+    type: 'solve',
+    knowledgePoints: ['化学式计算', '元素质量分数'],
+    tags: ['质量分数计算', '化学式计算'],
+    chapter: '化学式与化合价',
+    grade: 9,
+    subject: 'chemistry',
+  },
+  {
+    content: '下列物质中属于纯净物的是？',
+    answer: 'B',
+    type: 'choice',
+    options: ['A. 空气', 'B. 蒸馏水', 'C. 矿泉水', 'D. 海水'],
+    knowledgePoints: ['物质的分类', '纯净物与混合物'],
+    tags: ['概念辨析', '物质分类'],
+    chapter: '物质构成的奥秘',
+    grade: 9,
+    subject: 'chemistry',
+  },
+  {
+    content: '将铁钉放入硫酸铜（CuSO₄）溶液中，观察到的现象是什么？写出化学方程式。',
+    answer: '铁钉表面有红色物质析出，溶液由蓝色变浅。Fe + CuSO₄ = FeSO₄ + Cu',
+    type: 'solve',
+    knowledgePoints: ['金属活动性顺序', '置换反应'],
+    tags: ['金属活动性', '置换反应', '方程式书写'],
+    chapter: '金属',
+    grade: 9,
+    subject: 'chemistry',
+  },
+  {
+    content: '稀盐酸与氢氧化钠反应生成氯化钠和水，写出化学方程式并指出反应类型。',
+    answer: 'HCl + NaOH = NaCl + H₂O，中和反应（复分解反应）',
+    type: 'solve',
+    knowledgePoints: ['酸碱中和反应', '复分解反应', '化学方程式'],
+    tags: ['中和反应', '方程式书写', '反应类型'],
+    chapter: '酸和碱',
+    grade: 9,
+    subject: 'chemistry',
+  },
+  {
+    content: '检验二氧化碳气体通常使用什么试剂？现象是什么？',
+    answer: '澄清石灰水，现象是石灰水变浑浊',
+    type: 'fill',
+    knowledgePoints: ['二氧化碳的性质', '气体检验'],
+    tags: ['气体检验', '实验现象'],
+    chapter: '碳和碳的氧化物',
+    grade: 9,
+    subject: 'chemistry',
+  },
+  {
+    content: '下列金属中，活动性最强的是？',
+    answer: 'A',
+    type: 'choice',
+    options: ['A. 钠(Na)', 'B. 铁(Fe)', 'C. 铜(Cu)', 'D. 金(Au)'],
+    knowledgePoints: ['金属活动性顺序'],
+    tags: ['金属活动性', '记忆应用'],
+    chapter: '金属',
+    grade: 9,
+    subject: 'chemistry',
+  },
+  {
+    content: '用 32 g 高锰酸钾加热完全分解，理论上能制取多少克氧气？（相对分子质量：KMnO₄=158，O₂=32）',
+    answer: '约 3.25 g',
+    type: 'solve',
+    knowledgePoints: ['化学方程式计算', '质量守恒'],
+    tags: ['方程式计算', '质量比', '计算步骤'],
+    chapter: '化学方程式',
+    grade: 9,
+    subject: 'chemistry',
+  },
+];
+
+export function seedDatabase(): void {
+  const db = getDb();
+
+  // 写入题目(按学科检查,缺哪个补哪个,兼容已有数据)
+  const insertQ = db.prepare(`
+    INSERT INTO questions (content, answer, type, options, knowledge_points, tags, subject)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  const subjects: Subject[] = ['math', 'physics', 'chemistry'];
+  transaction(() => {
+    for (const subj of subjects) {
+      const cnt = db.prepare('SELECT COUNT(*) as c FROM questions WHERE subject = ?').get(subj) as { c: number };
+      if (cnt.c > 0) continue; // 该学科已有题目,跳过
+      const toInsert = SEED_QUESTIONS.filter(q => q.subject === subj);
+      for (const q of toInsert) {
+        insertQ.run(
+          q.content,
+          q.answer,
+          q.type,
+          q.options ? JSON.stringify(q.options) : null,
+          JSON.stringify(q.knowledgePoints),
+          JSON.stringify(q.tags),
+          q.subject,
+        );
+      }
+    }
+  });
+}

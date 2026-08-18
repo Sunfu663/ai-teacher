@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: ai-teacher
+    runtime: node
+    plan: free
+    region: singapore
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: 22.0.0
+      - key: AI_API_BASE
+        value: https://api.deepseek.com/v1
+      - key: AI_MODEL
+        value: deepseek-chat
+      - key: AI_API_KEY
+        sync: false
+      - key: DB_PATH
+        value: ./data/app.db
+      - key: PORT
+        value: 3001
