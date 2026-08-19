@@ -303,48 +303,26 @@ export async function analyzeSolution(req: AnalyzeRequest): Promise<AnalyzeRespo
   }
 }
 
-// 图片诊断:GLM-4V 一次性完成 OCR 识别步骤 + 错误诊断
-// 不走两次 API,以保证速度
+// 图片诊断:分两步保证诊断质量
+// 第1步:GLM-4V 只做 OCR 识别步骤(它的推理能力弱,只用来识字)
+// 第2步:把识别出的步骤传给 DeepSeek 做严格诊断(和文本模式一样的强验证)
 async function analyzeWithImage(req: AnalyzeRequest): Promise<AnalyzeResponse> {
   const config = getVisionConfig();
   const url = `${config.apiBase.replace(/\/$/, '')}/chat/completions`;
   const p = SUBJECT_PROFILES[req.subject];
 
-  const systemPrompt = `你是一位经验丰富的${p.role},擅长识别学生手写解题步骤并进行诊断。
+  // ===== 第 1 步:GLM-4V 只负责识别步骤 =====
+  const ocrSystemPrompt = `你是一个 OCR 识别助手,只负责把图片里的手写解题步骤逐行识别成电子版文本。
+规则:
+- 保留原始计算式和等号,不要修改任何数字或符号
+- 每一步单独一行
+- 只识别学生写的步骤,不要添加任何解释或诊断
+- 只输出一个 JSON,格式:{"steps":["第1步","第2步",...]}
+- 不要输出任何其他内容`;
 
-【任务分三步,但必须一次性完成,只输出一个JSON】
-1. 先识别图片中学生手写的解题步骤,逐行转换成电子版文本(保留原始计算式和等号,不要修改任何数字)
-2. 必须结合"题目"分析每一步是否正确:每一步是否在解答这道题?推导是否朝着题目的答案前进?最终结果是否真正解答了原题?
-3. 再对识别出的步骤进行诊断,指出错误
+  const ocrUserText = `请识别下面图片中学生手写的解题步骤,只输出 JSON。`;
 
-【关键:必须紧扣题目】
-- 每一步都要对照题目验证:这一步是否在解这道题?用的公式/方法对吗?
-- 最终答案必须代入原题验证:把答案代回题目,看是否满足题意
-- 脱离题目单独看步骤正确不算对,必须是在解这道题的正确步骤
-- 例如题目是"解方程2x-5=3",步骤"x=4"要代回验证:2×4-5=3✓才算对
-
-${subjectVerificationRule(req.subject)}
-
-【输出 JSON 格式,不要输出任何其他内容】
-{
-  "recognizedSteps": ["识别出的第1步原文", "第2步原文", ...],
-  "reasoning": "你的逐步验证过程:先列出题目要求,再逐步核对,最后把答案代回原题验证,得出结论",
-  "diagnosisType": "stuck|calc_error|logic_error|skip_step|no_idea|correct",
-  "errorStep": 出错步骤序号(整数,从1开始;无错误为null),
-  "coreError": "核心错误点描述;正确则为空字符串",
-  "guidance": "给学生的指导思路,启发式,不给答案",
-  "knowledgePoints": ["${p.subjectName}课本知识点1", "知识点2"],
-  "weakTags": ["薄弱标签1", "标签2"],
-  "isCorrect": true或false
-}`;
-
-  const userText = `【题目】
-${normalizeSubscripts(req.question)}
-
-【学生手写解题步骤图片】
-请先识别图片中的步骤,再结合上面的题目诊断每一步是否正确,最后把答案代回题目验证。${req.mode === 'guide' ? '学生正在解题中遇到困难,请求思路指导。' : '学生认为自己做完了,请检查是否有错误。'}`;
-
-  const resp = await fetch(url, {
+  const ocrResp = await fetch(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -353,43 +331,85 @@ ${normalizeSubscripts(req.question)}
     body: JSON.stringify({
       model: config.model,
       messages: [
-        { role: 'system', content: systemPrompt },
+        { role: 'system', content: ocrSystemPrompt },
         {
           role: 'user',
           content: [
-            { type: 'text', text: userText },
+            { type: 'text', text: ocrUserText },
             { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${req.image}` } },
           ],
         },
       ],
-      temperature: 0.2,
-      max_tokens: 1500,
+      temperature: 0.1,
+      max_tokens: 800,
     }),
   });
 
-  if (!resp.ok) {
-    const errText = await resp.text();
-    throw new Error(`视觉模型接口错误 ${resp.status}: ${errText}`);
+  if (!ocrResp.ok) {
+    const errText = await ocrResp.text();
+    throw new Error(`视觉模型接口错误 ${ocrResp.status}: ${errText}`);
   }
 
-  const data = await resp.json() as any;
-  const raw = data.choices?.[0]?.message?.content || '';
+  const ocrData = await ocrResp.json() as any;
+  const ocrRaw = ocrData.choices?.[0]?.message?.content || '';
+
+  // 解析识别出的步骤
+  let recognizedSteps: string[] = [];
+  try {
+    let text = ocrRaw.trim();
+    if (text.startsWith('```')) {
+      text = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+    }
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (jsonMatch) text = jsonMatch[0];
+    const parsed = JSON.parse(text);
+    if (Array.isArray(parsed.steps)) {
+      recognizedSteps = parsed.steps.map(String).filter(s => s);
+    } else if (Array.isArray(parsed.recognizedSteps)) {
+      recognizedSteps = parsed.recognizedSteps.map(String).filter(s => s);
+    }
+  } catch {
+    // JSON 解析失败,把原文按行拆分作为兜底
+    recognizedSteps = ocrRaw.split(/\n+/).map(s => s.trim()).filter(s => s && !s.includes('{') && !s.includes('}'));
+  }
+
+  if (recognizedSteps.length === 0) {
+    return {
+      diagnosisType: 'logic_error',
+      coreError: '图片中未识别到清晰的解题步骤,请重新拍照',
+      guidance: '请确保照片清晰、光线充足,步骤完整可见。',
+      knowledgePoints: [],
+      weakTags: [],
+      isCorrect: false,
+      reasoning: 'OCR 未识别到有效步骤',
+      recognizedSteps: [],
+    };
+  }
+
+  // ===== 第 2 步:用 DeepSeek 做严格诊断(和文本模式相同的强验证) =====
+  const textReq: AnalyzeRequest = {
+    ...req,
+    image: undefined, // 清除图片,走文本模式
+    steps: recognizedSteps,
+  };
+
+  const systemPrompt = buildSystemPrompt(textReq.subject);
+  const userMessage = buildUserMessage(textReq);
+  const raw = await callLLM(systemPrompt, userMessage);
 
   try {
     const parsed = parseDiagnosis(raw);
-    // 补上识别出的步骤
-    const recognized = extractRecognizedSteps(raw);
-    return { ...parsed, recognizedSteps: recognized };
+    return { ...parsed, recognizedSteps };
   } catch {
     return {
       diagnosisType: 'logic_error',
-      coreError: '图片识别结果解析异常,请重试或换张清晰的图',
+      coreError: '诊断结果解析异常,请重试',
       guidance: raw.slice(0, 500),
       knowledgePoints: [],
       weakTags: [],
       isCorrect: false,
       reasoning: raw.slice(0, 500),
-      recognizedSteps: [],
+      recognizedSteps,
     };
   }
 }
