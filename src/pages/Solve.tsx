@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef } from "react";
-import { Lightbulb, CheckCheck, Loader2, Plus, X, ChevronDown, BookText, RotateCcw, Camera, Image as ImageIcon, FileText } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { Lightbulb, CheckCheck, Loader2, Plus, X, ChevronDown, BookText, RotateCcw, Camera, Image as ImageIcon, FileText, MessageCircle } from "lucide-react";
 import { analyzeSolution, getQuestions } from "@/lib/api";
 import DiagnosisCard from "@/components/DiagnosisCard";
 import SubjectSwitcher from "@/components/SubjectSwitcher";
@@ -11,7 +12,8 @@ import { cn } from "@/lib/utils";
 type InputMode = "text" | "image";
 
 export default function Solve() {
-  const { subject } = useSubjectStore();
+  const { subject, setSubject } = useSubjectStore();
+  const navigate = useNavigate();
   const [questions, setQuestions] = useState<Question[]>([]);
   const [selectedQ, setSelectedQ] = useState<Question | null>(null);
   const [customQuestion, setCustomQuestion] = useState("");
@@ -31,12 +33,41 @@ export default function Solve() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
 
+  // 错题重做预填:从错题本跳转过来时,sessionStorage 里带着题目
+  const pendingRedoRef = useRef<{ question: string; subject: string } | null>(null);
+
+  // 仅挂载时检查 sessionStorage 是否有错题重做数据
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem('ai-teacher-redo');
+      if (raw) {
+        sessionStorage.removeItem('ai-teacher-redo');
+        const data = JSON.parse(raw);
+        pendingRedoRef.current = data;
+        // 学科不一致时先切换学科(会触发下方 subject useEffect 完成预填)
+        if (data.subject && data.subject !== subject) {
+          setSubject(data.subject);
+        } else {
+          setCustomQuestion(data.question);
+          setSelectedQ(null);
+        }
+      }
+    } catch { /* 忽略解析异常 */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     getQuestions(subject).then(setQuestions).catch(console.error);
     // 切换学科时清空当前选择与诊断,避免跨科数据混淆
     setSelectedQ(null);
     setCustomQuestion("");
     reset();
+    // 学科切换后,如果挂着错题重做任务且学科匹配,则预填题目
+    if (pendingRedoRef.current && pendingRedoRef.current.subject === subject) {
+      setCustomQuestion(pendingRedoRef.current.question);
+      pendingRedoRef.current = null;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [subject]);
 
   const currentQuestion = selectedQ?.content || customQuestion;
@@ -442,13 +473,30 @@ export default function Solve() {
             </div>
           )}
           <DiagnosisCard diagnosis={diagnosis} aiEnabled={aiEnabled} />
-          <button
-            onClick={reset}
-            className="w-full rounded-pill border border-ink-200 text-ink-500 py-2.5 text-sm font-medium flex items-center justify-center gap-1.5 hover:bg-ink-50 transition-colors"
-          >
-            <RotateCcw size={15} />
-            重新作答
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={reset}
+              className="flex-1 rounded-pill border border-ink-200 text-ink-500 py-2.5 text-sm font-medium flex items-center justify-center gap-1.5 hover:bg-ink-50 transition-colors"
+            >
+              <RotateCcw size={15} />
+              重新作答
+            </button>
+            <button
+              onClick={() => {
+                try {
+                  sessionStorage.setItem('ai-teacher-chat', JSON.stringify({
+                    subject,
+                    preset: `老师，这道题我不太懂，请帮我讲解答案和详细解题过程：\n\n${currentQuestion}`,
+                  }));
+                } catch { /* 忽略存储异常 */ }
+                navigate('/chat');
+              }}
+              className="flex-1 rounded-pill bg-amber/15 text-amber border border-amber/30 py-2.5 text-sm font-medium flex items-center justify-center gap-1.5 hover:bg-amber/25 transition-colors"
+            >
+              <MessageCircle size={15} />
+              问AI讲解
+            </button>
+          </div>
         </div>
       )}
     </div>

@@ -131,6 +131,23 @@ export async function getProfile(subject: Subject): Promise<ProfileData> {
   return request(`/api/profile${qs({ subject })}`);
 }
 
+// AI 聊天(讲解模式:直接给答案和详细过程分析)
+export interface ChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+export async function chatWithAI(
+  message: string,
+  subject: Subject,
+  history: ChatMessage[] = [],
+): Promise<{ reply: string; aiEnabled: boolean }> {
+  return request('/api/chat', {
+    method: 'POST',
+    body: JSON.stringify({ message, subject, history }),
+  });
+}
+
 // 题库
 export async function getQuestions(subject: Subject, count?: number): Promise<Question[]> {
   return request(`/api/questions${qs({ subject, count })}`);

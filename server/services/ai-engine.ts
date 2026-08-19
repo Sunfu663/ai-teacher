@@ -532,3 +532,112 @@ ${normalizeSubscripts(opts.correctAnswer)}
     return { recognizedAnswer: '', isCorrect: false };
   }
 }
+
+// ===== AI 聊天(讲解模式) =====
+// 与诊断模式不同:诊断是苏格拉底式启发不给答案,聊天是直接给答案和详细过程分析
+// 学生遇到不懂的题,可以在这里直接问 AI 答案和过程
+
+export interface ChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+const CHAT_PROFILES: Record<Subject, { role: string; subjectName: string; tip: string }> = {
+  math: {
+    role: '初中数学辅导老师',
+    subjectName: '数学',
+    tip: '注意符号运算、方程思想、几何证明的逻辑链条',
+  },
+  physics: {
+    role: '初中物理辅导老师',
+    subjectName: '物理',
+    tip: '注意公式选择、单位换算、受力分析、电路分析',
+  },
+  chemistry: {
+    role: '初中化学辅导老师',
+    subjectName: '化学',
+    tip: '注意化学方程式配平、反应类型、物质性质、实验现象',
+  },
+};
+
+function buildChatSystemPrompt(subject: Subject): string {
+  const p = CHAT_PROFILES[subject];
+  return `你是一位耐心的${p.role}。学生遇到不懂的${p.subjectName}题目时会向你提问,你的职责是直接给出答案和详细的解题过程分析。
+
+【核心职责】
+1. 直接给答案:学生问"这道题怎么做",你要明确给出最终答案。
+2. 详细过程分析:一步一步写出解题过程,每一步都要解释为什么这么做。
+3. 知识点关联:点出这道题考查的${p.subjectName}知识点,帮助学生举一反三。
+4. 易错提醒:指出这道题容易出错的地方,${p.tip}。
+5. 鼓励提问:如果学生还有疑问,鼓励他继续追问。
+
+【回答规范】
+- 用中文回答,语言亲切易懂,像一对一辅导。
+- 数学公式可以用纯文本表达(如 x² = 4 写成 x^2 = 4),化学下标用普通数字(如 H₂O 写成 H2O)。
+- 解题步骤用编号列出,清晰易读。
+- 如果学生只给了一道题没有说明哪里不懂,就完整讲解整道题。
+- 如果学生问的是概念性问题(如"什么是移项"),直接解释概念并举例。
+- 不要输出 markdown 代码块标记,直接用自然语言回答。`;
+}
+
+// AI 聊天主入口:接收学生消息和历史对话,返回 AI 回复
+export async function chatWithAI(
+  message: string,
+  subject: Subject,
+  history: ChatMessage[] = [],
+): Promise<string> {
+  // 无 API Key 时返回模拟回复(便于开发测试)
+  if (!isAIConfigured()) {
+    return mockChatReply(message, subject);
+  }
+
+  const systemPrompt = buildChatSystemPrompt(subject);
+  const config = getAIConfig();
+  const url = `${config.apiBase.replace(/\/$/, '')}/chat/completions`;
+
+  // 拼接历史对话(最多保留最近 10 轮,避免 token 超限)
+  const recentHistory = history.slice(-10);
+  const messages = [
+    { role: 'system', content: systemPrompt },
+    ...recentHistory.map(m => ({ role: m.role, content: m.content })),
+    { role: 'user', content: normalizeSubscripts(message) },
+  ];
+
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${config.apiKey}`,
+    },
+    body: JSON.stringify({
+      model: config.model,
+      messages,
+      temperature: 0.6,
+      max_tokens: 1500,
+    }),
+  });
+
+  if (!resp.ok) {
+    const errText = await resp.text();
+    throw new Error(`AI 接口错误 ${resp.status}: ${errText}`);
+  }
+
+  const data = await resp.json() as any;
+  return data.choices?.[0]?.message?.content || '抱歉,我没有理解你的问题,能再说一遍吗?';
+}
+
+// 无 API Key 时的模拟聊天回复
+function mockChatReply(message: string, subject: Subject): string {
+  const p = CHAT_PROFILES[subject];
+  return `【模拟回复 - 未配置 AI API Key】
+
+同学你好!你问的问题"${message.slice(0, 50)}..."很有价值。
+
+作为${p.role},我会这样帮你分析:
+
+1. 首先,我们要理解题意,明确已知条件和求解目标。
+2. 然后,运用${p.subjectName}的基本方法逐步求解。
+3. ${p.tip}。
+
+(注:当前服务器未配置 AI_API_KEY,这是模拟回复。配置后 AI 会给出真实的详细讲解。)`;
+}

@@ -16,6 +16,7 @@ import dailyRoutes from './routes/daily.js'
 import profileRoutes from './routes/profile.js'
 import questionRoutes from './routes/questions.js'
 import authRoutes from './routes/auth.js'
+import chatRoutes from './routes/chat.js'
 import { authOptional } from './lib/auth.js'
 
 import { ensureDefaultStudent } from './db.js'
@@ -57,6 +58,7 @@ app.use('/api/tags', tagRoutes)
 app.use('/api/daily', dailyRoutes)
 app.use('/api/profile', profileRoutes)
 app.use('/api/questions', questionRoutes)
+app.use('/api/chat', chatRoutes)
 
 /**
  * 健康检查

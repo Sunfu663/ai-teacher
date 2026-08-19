@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { PenLine, CalendarCheck, BookMarked, Flame, TrendingDown, ChevronRight, Clock } from "lucide-react";
+import { PenLine, CalendarCheck, BookMarked, Flame, TrendingDown, ChevronRight, Clock, MessageCircle } from "lucide-react";
 import { getTopWeakTags, getRecentErrors, getProfile } from "@/lib/api";
 import { useSubjectStore } from "@/store/subject";
 import { SUBJECT_LABELS } from "@/types";
@@ -65,10 +65,11 @@ export default function Home() {
 
       {/* 快捷入口 */}
       <section>
-        <div className="grid grid-cols-3 gap-3">
-          <QuickEntry icon={PenLine} label="解题练习" color="ink" onClick={() => navigate("/solve")} />
+        <div className="grid grid-cols-4 gap-2.5">
+          <QuickEntry icon={PenLine} label="解题" color="ink" onClick={() => navigate("/solve")} />
           <QuickEntry icon={CalendarCheck} label="每日十题" color="sage" onClick={() => navigate("/daily")} />
           <QuickEntry icon={BookMarked} label="错题本" color="pen" onClick={() => navigate("/notebook")} />
+          <QuickEntry icon={MessageCircle} label="AI讲解" color="amber" onClick={() => navigate("/chat")} />
         </div>
       </section>
 
@@ -148,13 +149,14 @@ export default function Home() {
 function QuickEntry({ icon: Icon, label, color, onClick }: {
   icon: typeof PenLine;
   label: string;
-  color: "ink" | "sage" | "pen";
+  color: "ink" | "sage" | "pen" | "amber";
   onClick: () => void;
 }) {
   const colorMap = {
     ink: "bg-ink-50 text-ink-600",
     sage: "bg-sage-50 text-sage-600",
     pen: "bg-pen-50 text-pen-600",
+    amber: "bg-amber/15 text-amber",
   };
   return (
     <button

@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { getNotebook, getTags, deleteError } from "@/lib/api";
 import SubjectSwitcher from "@/components/SubjectSwitcher";
 import { useSubjectStore } from "@/store/subject";
 import { SUBJECT_LABELS } from "@/types";
 import type { ErrorRecord, TagWithWeight } from "@/types";
 import { cn } from "@/lib/utils";
-import { Trash2, BookMarked, Filter, ChevronDown, Brain, ChevronRight, BookOpen, AlertCircle } from "lucide-react";
+import { Trash2, BookMarked, Filter, ChevronDown, Brain, ChevronRight, BookOpen, AlertCircle, RotateCcw, MessageCircle, Search, X } from "lucide-react";
 
 const TYPE_LABELS: Record<string, string> = {
   stuck: "卡壳中途",
@@ -17,7 +18,12 @@ const TYPE_LABELS: Record<string, string> = {
 };
 
 // 单条错题卡片 - 展示学生步骤(AI标注错误位置) + AI识别推理过程 + 指导
-function ErrorCard({ rec, onDelete }: { rec: ErrorRecord; onDelete: (id: number) => void }) {
+function ErrorCard({ rec, onDelete, onRedo, onAskAI }: {
+  rec: ErrorRecord;
+  onDelete: (id: number) => void;
+  onRedo: (rec: ErrorRecord) => void;
+  onAskAI: (rec: ErrorRecord) => void;
+}) {
   const [showReasoning, setShowReasoning] = useState(false);
   const hasSteps = rec.studentSteps && rec.studentSteps.length > 0;
   const hasReasoning = !!rec.reasoning;
@@ -29,7 +35,7 @@ function ErrorCard({ rec, onDelete }: { rec: ErrorRecord; onDelete: (id: number)
         <div className="flex-1 p-4">
           {/* 题目 + 删除 */}
           <div className="flex items-start justify-between gap-2 mb-2">
-            <p className="text-sm font-medium text-ink-700 leading-relaxed">{rec.question}</p>
+            <p className="text-sm font-medium text-ink-700 leading-relaxed flex-1">{rec.question}</p>
             <button
               onClick={() => onDelete(rec.id)}
               className="flex-shrink-0 p-1 text-ink-200 hover:text-pen-500 transition-colors"
@@ -161,6 +167,24 @@ function ErrorCard({ rec, onDelete }: { rec: ErrorRecord; onDelete: (id: number)
             </div>
             <span className="text-xs font-bold text-ink-400 w-8 text-right">{rec.mastery}%</span>
           </div>
+
+          {/* 操作按钮:重做 / 问AI */}
+          <div className="flex gap-2 mt-3">
+            <button
+              onClick={() => onRedo(rec)}
+              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-pill bg-ink-700 text-white text-xs font-medium hover:bg-ink-600 transition-colors"
+            >
+              <RotateCcw size={14} />
+              错题重做
+            </button>
+            <button
+              onClick={() => onAskAI(rec)}
+              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-pill bg-amber/15 text-amber border border-amber/30 text-xs font-medium hover:bg-amber/25 transition-colors"
+            >
+              <MessageCircle size={14} />
+              问AI讲解
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -169,10 +193,12 @@ function ErrorCard({ rec, onDelete }: { rec: ErrorRecord; onDelete: (id: number)
 
 export default function Notebook() {
   const { subject } = useSubjectStore();
+  const navigate = useNavigate();
   const [records, setRecords] = useState<ErrorRecord[]>([]);
   const [tags, setTags] = useState<TagWithWeight[]>([]);
   const [activeTag, setActiveTag] = useState<string | undefined>();
   const [showFilter, setShowFilter] = useState(false);
+  const [searchKeyword, setSearchKeyword] = useState("");
 
   const load = (tag?: string) => {
     Promise.all([getNotebook(subject, tag), getTags(subject)])
@@ -184,6 +210,7 @@ export default function Notebook() {
     // 切换学科时重置标签筛选,避免选中不存在的标签
     setActiveTag(undefined);
     setShowFilter(false);
+    setSearchKeyword("");
     load();
   }, [subject]);
 
@@ -198,12 +225,51 @@ export default function Notebook() {
     load(activeTag);
   };
 
+  // 错题重做:把题目存入 sessionStorage(刷新不丢),再跳转到解题页
+  const handleRedo = (rec: ErrorRecord) => {
+    try {
+      sessionStorage.setItem('ai-teacher-redo', JSON.stringify({
+        question: rec.question,
+        subject: rec.subject,
+        errorId: rec.id,
+      }));
+    } catch { /* 忽略存储异常 */ }
+    navigate('/solve');
+  };
+
+  // 问AI讲解:把题目和错因存入 sessionStorage,跳转到聊天页
+  const handleAskAI = (rec: ErrorRecord) => {
+    try {
+      sessionStorage.setItem('ai-teacher-chat', JSON.stringify({
+        question: rec.question,
+        subject: rec.subject,
+        coreError: rec.coreError,
+        guidance: rec.guidance,
+        studentSteps: rec.studentSteps,
+        preset: `老师，这道题我做错了，请帮我讲解这道题的答案和详细解题过程：\n\n${rec.question}\n\n我的错误是：${rec.coreError || '（无记录）'}`,
+      }));
+    } catch { /* 忽略存储异常 */ }
+    navigate('/chat');
+  };
+
+  // 关键词搜索过滤(题目或步骤包含关键词)
+  const filteredRecords = searchKeyword.trim()
+    ? records.filter(rec => {
+        const kw = searchKeyword.trim().toLowerCase();
+        return rec.question.toLowerCase().includes(kw)
+          || rec.coreError.toLowerCase().includes(kw)
+          || rec.guidance.toLowerCase().includes(kw)
+          || rec.tags.some(t => t.toLowerCase().includes(kw))
+          || (rec.studentSteps || []).some(s => s.toLowerCase().includes(kw));
+      })
+    : records;
+
   return (
     <div className="px-5 pt-12 pb-6 space-y-4">
       <header className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-serif font-bold text-ink-700">{SUBJECT_LABELS[subject]}错题本</h1>
-          <p className="text-sm text-ink-400 mt-0.5">{records.length} 道错题 · 自适应巩固</p>
+          <p className="text-sm text-ink-400 mt-0.5">{filteredRecords.length} 道错题 · 自适应巩固</p>
         </div>
         <button
           onClick={() => setShowFilter(!showFilter)}
@@ -216,6 +282,26 @@ export default function Notebook() {
       </header>
 
       <SubjectSwitcher />
+
+      {/* 搜索框 */}
+      <div className="relative">
+        <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-300" />
+        <input
+          type="text"
+          value={searchKeyword}
+          onChange={e => setSearchKeyword(e.target.value)}
+          placeholder="搜索题目、错因、标签或步骤..."
+          className="w-full pl-9 pr-9 py-2.5 rounded-pill bg-paper-50 border border-ink-100 text-sm text-ink-700 placeholder:text-ink-300 focus:outline-none focus:border-ink-300"
+        />
+        {searchKeyword && (
+          <button
+            onClick={() => setSearchKeyword("")}
+            className="absolute right-3 top-1/2 -translate-y-1/2 p-0.5 text-ink-300 hover:text-ink-500"
+          >
+            <X size={15} />
+          </button>
+        )}
+      </div>
 
       {/* 标签筛选 */}
       {showFilter && (
@@ -246,16 +332,22 @@ export default function Notebook() {
       )}
 
       {/* 错题列表 */}
-      {records.length === 0 ? (
+      {filteredRecords.length === 0 ? (
         <div className="rounded-2xl border-2 border-dashed border-ink-100 px-6 py-12 text-center">
           <BookMarked size={32} className="text-ink-200 mx-auto mb-3" />
-          <p className="text-sm text-ink-400">暂无错题</p>
-          <p className="text-xs text-ink-300 mt-1">去解题练习中挑战一下吧</p>
+          <p className="text-sm text-ink-400">{searchKeyword ? "没有匹配的错题" : "暂无错题"}</p>
+          <p className="text-xs text-ink-300 mt-1">{searchKeyword ? "换个关键词试试" : "去解题练习中挑战一下吧"}</p>
         </div>
       ) : (
         <div className="space-y-3">
-          {records.map(rec => (
-            <ErrorCard key={rec.id} rec={rec} onDelete={handleDelete} />
+          {filteredRecords.map(rec => (
+            <ErrorCard
+              key={rec.id}
+              rec={rec}
+              onDelete={handleDelete}
+              onRedo={handleRedo}
+              onAskAI={handleAskAI}
+            />
           ))}
         </div>
       )}
