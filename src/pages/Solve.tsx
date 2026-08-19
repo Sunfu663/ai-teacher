@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { Lightbulb, CheckCheck, Loader2, Plus, X, ChevronDown, BookText, RotateCcw, Camera, Image as ImageIcon, FileText, MessageCircle } from "lucide-react";
-import { analyzeSolution, getQuestions } from "@/lib/api";
+import { analyzeSolution, getQuestions, redoError } from "@/lib/api";
 import DiagnosisCard from "@/components/DiagnosisCard";
 import SubjectSwitcher from "@/components/SubjectSwitcher";
 import { useSubjectStore } from "@/store/subject";
@@ -34,7 +34,10 @@ export default function Solve() {
   const cameraInputRef = useRef<HTMLInputElement>(null);
 
   // 错题重做预填:从错题本跳转过来时,sessionStorage 里带着题目
-  const pendingRedoRef = useRef<{ question: string; subject: string } | null>(null);
+  // errorId 用于重做正确时回写掌握度,形成"错题→重做→巩固"闭环
+  const pendingRedoRef = useRef<{ question: string; subject: string; errorId?: number } | null>(null);
+  const [redoErrorId, setRedoErrorId] = useState<number | undefined>(undefined);
+  const [redoFeedback, setRedoFeedback] = useState("");
 
   // 仅挂载时检查 sessionStorage 是否有错题重做数据
   useEffect(() => {
@@ -44,6 +47,7 @@ export default function Solve() {
         sessionStorage.removeItem('ai-teacher-redo');
         const data = JSON.parse(raw);
         pendingRedoRef.current = data;
+        if (data.errorId) setRedoErrorId(data.errorId);
         // 学科不一致时先切换学科(会触发下方 subject useEffect 完成预填)
         if (data.subject && data.subject !== subject) {
           setSubject(data.subject);
@@ -153,6 +157,19 @@ export default function Solve() {
       setDiagnosis(result.diagnosis);
       setAiEnabled(result.aiEnabled);
       setSaved(!!result.errorRecord);
+
+      // 错题重做闭环:check 模式下诊断正确,自动回写掌握度并降低标签权重
+      if (mode === "check" && redoErrorId && result.diagnosis.isCorrect) {
+        try {
+          await redoError(redoErrorId, true, result.diagnosis.weakTags, subject);
+          setRedoFeedback("重做正确！掌握度已提升，薄弱标签已减弱");
+        } catch {
+          // 回写失败不影响主流程,只是数据没更新
+          console.error('重做反馈失败');
+        } finally {
+          setRedoErrorId(undefined);
+        }
+      }
     } catch (err: any) {
       setError(err.message || "诊断失败，请重试");
     } finally {
@@ -165,6 +182,7 @@ export default function Solve() {
     setDiagnosis(null);
     setSaved(false);
     setError("");
+    setRedoFeedback("");
     setImagePreview("");
     setImageBase64("");
   };
@@ -197,6 +215,12 @@ export default function Solve() {
           <div className="flex items-center gap-1.5">
             <BookText size={15} className="text-ink-500" />
             <span className="text-xs font-semibold text-ink-500">题目</span>
+            {redoErrorId && (
+              <span className="ml-1 flex items-center gap-1 px-2 py-0.5 rounded bg-sage-50 text-sage-600 text-[10px] font-semibold">
+                <RotateCcw size={10} />
+                错题重做
+              </span>
+            )}
           </div>
           <button
             onClick={() => setShowPicker(!showPicker)}
@@ -470,6 +494,11 @@ export default function Solve() {
             <div className="flex items-center gap-2 rounded-xl bg-sage-50 border border-sage-100 px-4 py-2 text-xs text-sage-700">
               <span className="font-semibold">✓ 已自动存入错题本</span>
               <span className="text-sage-500">薄弱标签已更新</span>
+            </div>
+          )}
+          {redoFeedback && (
+            <div className="flex items-center gap-2 rounded-xl bg-sage-50 border border-sage-100 px-4 py-2 text-xs text-sage-700 animate-fadeInUp">
+              <span className="font-semibold">🎉 {redoFeedback}</span>
             </div>
           )}
           <DiagnosisCard diagnosis={diagnosis} aiEnabled={aiEnabled} />

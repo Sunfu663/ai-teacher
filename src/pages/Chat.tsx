@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Send, Loader2, ArrowLeft, MessageCircle, Trash2, BookText } from "lucide-react";
-import { chatWithAI, type ChatMessage } from "@/lib/api";
+import { Send, Loader2, ArrowLeft, MessageCircle, Trash2, BookText, History } from "lucide-react";
+import { chatWithAIStream, type ChatMessage } from "@/lib/api";
 import SubjectSwitcher from "@/components/SubjectSwitcher";
 import { useSubjectStore } from "@/store/subject";
 import { SUBJECT_LABELS } from "@/types";
+import type { Subject } from "@/types";
 import { cn } from "@/lib/utils";
 
 const QUICK_QUESTIONS = [
@@ -14,6 +15,36 @@ const QUICK_QUESTIONS = [
   "这道题容易在哪里出错？",
 ];
 
+// localStorage key:按学科分别存对话记录(刷新/返回后能恢复)
+const STORAGE_PREFIX = 'ai-teacher-chat-history-';
+
+function loadHistory(subject: Subject): ChatMessage[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_PREFIX + subject);
+    if (!raw) return [];
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? arr.filter(m => m && m.role && m.content) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveHistory(subject: Subject, messages: ChatMessage[]) {
+  try {
+    // 最多保留最近 20 条(10 轮对话),避免 localStorage 超限
+    const toSave = messages.slice(-20);
+    localStorage.setItem(STORAGE_PREFIX + subject, JSON.stringify(toSave));
+  } catch {
+    // 存储失败(如空间不足)忽略,不影响使用
+  }
+}
+
+function clearHistory(subject: Subject) {
+  try {
+    localStorage.removeItem(STORAGE_PREFIX + subject);
+  } catch { /* 忽略 */ }
+}
+
 export default function Chat() {
   const navigate = useNavigate();
   const { subject, setSubject } = useSubjectStore();
@@ -21,10 +52,22 @@ export default function Chat() {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [streamingText, setStreamingText] = useState(""); // 正在流式输出的文本
   const scrollRef = useRef<HTMLDivElement>(null);
   // 仅挂载时检查 sessionStorage 是否有预设问题(从错题本跳转过来)
   const presetHandled = useRef(false);
+  const prevSubjectRef = useRef<Subject>(subject);
 
+  // 挂载/学科切换时加载该学科的历史对话
+  useEffect(() => {
+    const history = loadHistory(subject);
+    setMessages(history);
+    setStreamingText("");
+    setError("");
+    prevSubjectRef.current = subject;
+  }, [subject]);
+
+  // 检查 sessionStorage 是否有预设问题(从错题本/Solve页跳转过来)
   useEffect(() => {
     if (presetHandled.current) return;
     presetHandled.current = true;
@@ -33,11 +76,9 @@ export default function Chat() {
       if (raw) {
         sessionStorage.removeItem('ai-teacher-chat');
         const data = JSON.parse(raw);
-        // 学科不一致时先切换
         if (data.subject && data.subject !== subject) {
           setSubject(data.subject);
         }
-        // 把预设问题填入输入框,用户确认后发送
         if (data.preset) {
           setInput(data.preset);
         }
@@ -46,12 +87,12 @@ export default function Chat() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // 滚动到底部
+  // 滚动到底部(消息变化或流式文本增长时)
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [messages, loading]);
+  }, [messages, streamingText, loading]);
 
   const handleSend = async (text?: string) => {
     const content = (text ?? input).trim();
@@ -62,25 +103,50 @@ export default function Chat() {
     setMessages(nextMessages);
     setInput("");
     setLoading(true);
+    setStreamingText("");
 
     try {
       // 历史对话传给后端(不含刚加入的 userMsg,后端会拼)
       const history = messages;
-      const { reply } = await chatWithAI(content, subject, history);
-      setMessages([...nextMessages, { role: "assistant", content: reply }]);
+      let fullReply = "";
+
+      // 流式接收 AI 回复,逐段更新 UI(打字机效果)
+      for await (const delta of chatWithAIStream(content, subject, history)) {
+        fullReply += delta;
+        setStreamingText(fullReply);
+      }
+
+      if (!fullReply.trim()) {
+        fullReply = "抱歉，我没有理解你的问题，能再说一遍吗？";
+        setStreamingText(fullReply);
+      }
+
+      const finalMessages = [...nextMessages, { role: "assistant" as const, content: fullReply }];
+      setMessages(finalMessages);
+      setStreamingText("");
+      // 持久化到 localStorage
+      saveHistory(subject, finalMessages);
     } catch (err: any) {
       setError(err.message || "AI 回复失败，请重试");
       // 失败时移除刚发的那条,方便重试
       setMessages(messages);
     } finally {
       setLoading(false);
+      setStreamingText("");
     }
   };
 
   const handleClear = () => {
     setMessages([]);
+    setStreamingText("");
     setError("");
+    clearHistory(subject);
   };
+
+  // 消息列表 + 正在流式输出的消息
+  const displayMessages: ChatMessage[] = streamingText
+    ? [...messages, { role: "assistant", content: streamingText }]
+    : messages;
 
   return (
     <div className="flex flex-col h-screen max-h-screen">
@@ -117,7 +183,7 @@ export default function Chat() {
 
       {/* 消息列表 */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-4 bg-paper-100">
-        {messages.length === 0 && !loading && (
+        {displayMessages.length === 0 && !loading && (
           <div className="flex flex-col items-center justify-center h-full text-center px-6">
             <div className="w-16 h-16 rounded-full bg-amber/15 flex items-center justify-center mb-4">
               <MessageCircle size={28} className="text-amber" />
@@ -144,29 +210,36 @@ export default function Chat() {
           </div>
         )}
 
-        {messages.map((msg, i) => (
-          <div
-            key={i}
-            className={cn(
-              "flex",
-              msg.role === "user" ? "justify-end" : "justify-start"
-            )}
-          >
+        {displayMessages.map((msg, i) => {
+          // 最后一条 assistant 消息且正在流式输出时,显示打字光标
+          const isStreamingLast = streamingText && i === displayMessages.length - 1 && msg.role === "assistant";
+          return (
             <div
+              key={i}
               className={cn(
-                "max-w-[85%] rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed whitespace-pre-wrap",
-                msg.role === "user"
-                  ? "bg-ink-700 text-white rounded-br-sm"
-                  : "bg-paper-50 border border-ink-100 text-ink-700 rounded-bl-sm shadow-sm"
+                "flex",
+                msg.role === "user" ? "justify-end" : "justify-start"
               )}
             >
-              {msg.content}
+              <div
+                className={cn(
+                  "max-w-[85%] rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed whitespace-pre-wrap",
+                  msg.role === "user"
+                    ? "bg-ink-700 text-white rounded-br-sm"
+                    : "bg-paper-50 border border-ink-100 text-ink-700 rounded-bl-sm shadow-sm"
+                )}
+              >
+                {msg.content}
+                {isStreamingLast && (
+                  <span className="inline-block w-1 h-4 ml-0.5 bg-ink-500 animate-pulseSoft align-middle" />
+                )}
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
 
-        {/* 加载中 */}
-        {loading && (
+        {/* 加载中(等待首个 chunk 到达) */}
+        {loading && !streamingText && (
           <div className="flex justify-start">
             <div className="bg-paper-50 border border-ink-100 rounded-2xl rounded-bl-sm px-4 py-3 shadow-sm flex items-center gap-2">
               <Loader2 size={16} className="animate-spin text-ink-400" />
@@ -179,6 +252,14 @@ export default function Chat() {
         {error && (
           <div className="rounded-xl bg-pen-50 border border-pen-100 px-4 py-2.5 text-sm text-pen-600">
             {error}
+          </div>
+        )}
+
+        {/* 历史记录提示(非空且不是流式输出时显示) */}
+        {messages.length > 0 && !loading && !streamingText && (
+          <div className="text-center text-xs text-ink-300 flex items-center justify-center gap-1 pt-2">
+            <History size={11} />
+            对话已保存,切换学科或返回后再来仍可继续
           </div>
         )}
       </div>

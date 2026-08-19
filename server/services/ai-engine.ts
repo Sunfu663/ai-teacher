@@ -641,3 +641,92 @@ function mockChatReply(message: string, subject: Subject): string {
 
 (注:当前服务器未配置 AI_API_KEY,这是模拟回复。配置后 AI 会给出真实的详细讲解。)`;
 }
+
+// 流式 AI 聊天:通过 async generator 逐段产出文本,前端打字机效果
+// 用法:for await (const chunk of chatStreamWithAI(...)) { ... }
+export async function* chatStreamWithAI(
+  message: string,
+  subject: Subject,
+  history: ChatMessage[] = [],
+): AsyncGenerator<string, void, unknown> {
+  // 无 API Key 时一次性产出模拟回复(模拟流式:逐字 yield)
+  if (!isAIConfigured()) {
+    const full = mockChatReply(message, subject);
+    // 按 10 字一段产出,模拟打字机
+    const chunkSize = 10;
+    for (let i = 0; i < full.length; i += chunkSize) {
+      yield full.slice(i, i + chunkSize);
+      // 小延时,让前端能看到打字效果
+      await new Promise(r => setTimeout(r, 30));
+    }
+    return;
+  }
+
+  const systemPrompt = buildChatSystemPrompt(subject);
+  const config = getAIConfig();
+  const url = `${config.apiBase.replace(/\/$/, '')}/chat/completions`;
+
+  const recentHistory = history.slice(-10);
+  const messages = [
+    { role: 'system', content: systemPrompt },
+    ...recentHistory.map(m => ({ role: m.role, content: m.content })),
+    { role: 'user', content: normalizeSubscripts(message) },
+  ];
+
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${config.apiKey}`,
+    },
+    body: JSON.stringify({
+      model: config.model,
+      messages,
+      temperature: 0.6,
+      max_tokens: 1500,
+      stream: true, // 关键:启用流式响应
+    }),
+  });
+
+  if (!resp.ok) {
+    const errText = await resp.text();
+    throw new Error(`AI 接口错误 ${resp.status}: ${errText}`);
+  }
+
+  if (!resp.body) {
+    throw new Error('AI 接口未返回响应体');
+  }
+
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder('utf-8');
+  let buffer = '';
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      // SSE 格式:每条消息以 \n\n 分隔,每行 data: 开头
+      const lines = buffer.split('\n');
+      // 最后一段可能不完整,留在 buffer 下次处理
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || !trimmed.startsWith('data:')) continue;
+        const data = trimmed.slice(5).trim();
+        if (data === '[DONE]') return;
+        try {
+          const parsed = JSON.parse(data);
+          const delta = parsed.choices?.[0]?.delta?.content;
+          if (delta) yield delta;
+        } catch {
+          // 单行 JSON 解析失败,跳过(可能是心跳或部分包)
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}

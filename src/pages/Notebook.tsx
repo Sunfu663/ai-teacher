@@ -225,7 +225,8 @@ export default function Notebook() {
     load(activeTag);
   };
 
-  // 错题重做:把题目存入 sessionStorage(刷新不丢),再跳转到解题页
+  // 错题重做:把题目和 errorId 存入 sessionStorage(刷新不丢),再跳转到解题页
+  // errorId 用于重做正确时回写掌握度,形成"错题→重做→巩固"闭环
   const handleRedo = (rec: ErrorRecord) => {
     try {
       sessionStorage.setItem('ai-teacher-redo', JSON.stringify({

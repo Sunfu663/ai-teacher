@@ -148,6 +148,72 @@ export async function chatWithAI(
   });
 }
 
+// AI 聊天流式接口(打字机效果):返回 async generator,逐段 yield 文本增量
+// 用法:for await (const delta of chatWithAIStream(...)) { ... }
+export async function* chatWithAIStream(
+  message: string,
+  subject: Subject,
+  history: ChatMessage[] = [],
+): AsyncGenerator<string, void, unknown> {
+  const token = getToken();
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'Accept': 'text/event-stream',
+  };
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+
+  const resp = await fetch(API_BASE + '/api/chat/stream', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ message, subject, history }),
+  });
+
+  if (!resp.ok) {
+    const text = await resp.text();
+    throw new Error(`AI 接口错误 (HTTP ${resp.status}): ${text}`);
+  }
+
+  if (!resp.body) {
+    throw new Error('AI 接口未返回响应流');
+  }
+
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder('utf-8');
+  let buffer = '';
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || !trimmed.startsWith('data:')) continue;
+        const data = trimmed.slice(5).trim();
+        if (data === '[DONE]') return;
+        try {
+          const parsed = JSON.parse(data);
+          if (parsed.error) throw new Error(parsed.error);
+          if (parsed.delta) yield parsed.delta as string;
+          // done 字段是流结束标记,跳过(完整文本已通过 delta 累积)
+        } catch (e) {
+          // error 类型需要抛出让上层捕获
+          if (e instanceof Error && e.message && !e.message.includes('JSON')) {
+            throw e;
+          }
+          // JSON 解析失败,跳过(部分包)
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
 // 题库
 export async function getQuestions(subject: Subject, count?: number): Promise<Question[]> {
   return request(`/api/questions${qs({ subject, count })}`);
