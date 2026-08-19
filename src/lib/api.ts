@@ -17,12 +17,37 @@ import type {
 // API 基础地址：App 打包后访问云端 API；本地开发走 vite 代理
 const API_BASE = import.meta.env.VITE_API_BASE || '';
 
+// 从 localStorage 读取 token(避免循环依赖,直接读 storage)
+function getToken(): string | null {
+  try {
+    const raw = localStorage.getItem('ai-teacher-auth');
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed?.state?.token || null;
+  } catch {
+    return null;
+  }
+}
+
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const token = getToken();
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  // 合并调用方传入的 headers(优先级低于 token)
+  const mergedHeaders = { ...(options?.headers as Record<string, string> | undefined), ...headers };
   const resp = await fetch(API_BASE + url, {
-    headers: { 'Content-Type': 'application/json' },
     ...options,
+    headers: mergedHeaders,
   });
-  const data = await resp.json();
+  // 兼容空响应(204 No Content 或 body 为空)避免 JSON 解析报错
+  const text = await resp.text();
+  if (!text) return undefined as T;
+  let data: any;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    throw new Error(`响应解析失败 (HTTP ${resp.status})`);
+  }
   if (!data.success) throw new Error(data.error || '请求失败');
   return data.data as T;
 }
@@ -109,4 +134,24 @@ export async function getProfile(subject: Subject): Promise<ProfileData> {
 // 题库
 export async function getQuestions(subject: Subject, count?: number): Promise<Question[]> {
   return request(`/api/questions${qs({ subject, count })}`);
+}
+
+// ===== 认证相关 =====
+
+export async function register(opts: { username: string; password: string; name?: string }): Promise<{ token: string; user: { id: number; username: string; name: string } }> {
+  return request('/api/auth/register', {
+    method: 'POST',
+    body: JSON.stringify(opts),
+  });
+}
+
+export async function login(opts: { username: string; password: string }): Promise<{ token: string; user: { id: number; username: string; name: string } }> {
+  return request('/api/auth/login', {
+    method: 'POST',
+    body: JSON.stringify(opts),
+  });
+}
+
+export async function getMe(): Promise<{ user: { id: number; username: string | null; phone: string | null; name: string } }> {
+  return request('/api/auth/me');
 }

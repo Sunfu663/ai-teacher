@@ -15,6 +15,8 @@ import tagRoutes from './routes/tags.js'
 import dailyRoutes from './routes/daily.js'
 import profileRoutes from './routes/profile.js'
 import questionRoutes from './routes/questions.js'
+import authRoutes from './routes/auth.js'
+import { authOptional } from './lib/auth.js'
 
 import { ensureDefaultStudent } from './db.js'
 import { seedDatabase } from './seed.js'
@@ -36,7 +38,18 @@ try {
 }
 
 /**
- * API 路由
+ * 认证路由(注册/登录/获取当前用户) - 不走 authOptional 中间件
+ */
+app.use('/api/auth', authRoutes)
+
+/**
+ * 软认证中间件:有 token 校验,无 token 回退到默认学生(向后兼容旧 App)
+ * 挂载在所有数据路由之前,把 req.user 注入到后续处理
+ */
+app.use('/api', authOptional)
+
+/**
+ * API 路由(经过软认证后,req.user.id 即为当前学生 id)
  */
 app.use('/api/analyze', analyzeRoutes)
 app.use('/api/notebook', notebookRoutes)

@@ -2,11 +2,12 @@
  * 学生画像服务 - 学习数据统计与掌握度分析
  * 可按学科过滤统计
  */
-import { getDb, ensureDefaultStudent } from '../db.js';
+import { getDb } from '../db.js';
+import { getCurrentStudentId } from '../lib/context.js';
 import { getAllTags } from './tag-service.js';
 import type { ProfileData, Subject } from '../../shared/types.js';
 
-const STUDENT_ID = () => ensureDefaultStudent();
+const STUDENT_ID = () => getCurrentStudentId();
 
 export function getProfile(subject?: Subject): ProfileData {
   const db = getDb();

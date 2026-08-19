@@ -3,10 +3,11 @@
  * 连错 +15(上限100),做对 -20(下限0,归零移除)
  * 标签按学科隔离,同一名称在不同学科是独立标签
  */
-import { getDb, ensureDefaultStudent, transaction } from '../db.js';
+import { getDb, transaction } from '../db.js';
+import { getCurrentStudentId } from '../lib/context.js';
 import type { TagWithWeight, Subject } from '../../shared/types.js';
 
-const STUDENT_ID = () => ensureDefaultStudent();
+const STUDENT_ID = () => getCurrentStudentId();
 
 // 确保标签存在(按学科隔离),返回 tag_id
 function ensureTag(name: string, subject: Subject): number {

@@ -2,10 +2,11 @@
  * 错题本服务 - 错题的收录、查询、删除与重做
  * 错题按学科归属,查询时按 subject 过滤
  */
-import { getDb, ensureDefaultStudent } from '../db.js';
+import { getDb } from '../db.js';
+import { getCurrentStudentId } from '../lib/context.js';
 import type { ErrorRecord, AnalyzeResponse, Subject } from '../../shared/types.js';
 
-const STUDENT_ID = () => ensureDefaultStudent();
+const STUDENT_ID = () => getCurrentStudentId();
 
 // 新增错题(来自 AI 诊断结果,带学科)
 export function addErrorRecord(

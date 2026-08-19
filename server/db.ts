@@ -39,6 +39,9 @@ function initSchema(database: DatabaseSync) {
     CREATE TABLE IF NOT EXISTS students (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL DEFAULT '学生',
+      username TEXT UNIQUE,
+      password_hash TEXT,
+      phone TEXT UNIQUE,
       streak_days INTEGER DEFAULT 0,
       last_active TEXT,
       created_at TEXT DEFAULT (datetime('now'))
@@ -117,6 +120,9 @@ function initSchema(database: DatabaseSync) {
   // 迁移:为已存在的旧表补充 subject 列(必须在依赖 subject 列的索引之前执行)
   migrateAddSubject(database);
 
+  // 迁移:为 students 表补充账号字段(username/password_hash/phone),为电话注册预留
+  migrateAddAccountColumns(database);
+
   // 迁移:为 error_records 表补充 reasoning 和 error_step 列(让错题本展示AI识别错误的推理过程与出错步骤)
   migrateAddReasoningAndErrorStep(database);
 
@@ -124,6 +130,24 @@ function initSchema(database: DatabaseSync) {
   database.exec(`
     CREATE INDEX IF NOT EXISTS idx_questions_subject ON questions(subject);
     CREATE INDEX IF NOT EXISTS idx_error_subject ON error_records(subject);
+  `);
+}
+
+// 为 students 表补充账号字段(username/password_hash/phone),为电话注册预留
+function migrateAddAccountColumns(database: DatabaseSync) {
+  if (!columnExists(database, 'students', 'username')) {
+    database.exec(`ALTER TABLE students ADD COLUMN username TEXT`);
+  }
+  if (!columnExists(database, 'students', 'password_hash')) {
+    database.exec(`ALTER TABLE students ADD COLUMN password_hash TEXT`);
+  }
+  if (!columnExists(database, 'students', 'phone')) {
+    database.exec(`ALTER TABLE students ADD COLUMN phone TEXT`);
+  }
+  // 建索引方便登录查询(UNIQUE 约束已在建表时声明,旧表迁移时补 UNIQUE 索引)
+  database.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_students_username ON students(username) WHERE username IS NOT NULL;
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_students_phone ON students(phone) WHERE phone IS NOT NULL;
   `);
 }
 
@@ -184,7 +208,7 @@ function rebuildTagsTable(database: DatabaseSync) {
   }
 }
 
-// 确保存在默认学生,返回学生 id
+// 确保存在默认学生,返回学生 id(兼容旧版本无账号模式)
 export function ensureDefaultStudent(): number {
   const database = getDb();
   let row = database.prepare('SELECT id FROM students WHERE id = 1').get() as { id: number } | undefined;
@@ -193,6 +217,43 @@ export function ensureDefaultStudent(): number {
     return Number(info.lastInsertRowid);
   }
   return row.id;
+}
+
+// 按用户名查询学生(登录用)
+export function findStudentByUsername(username: string): { id: number; username: string; password_hash: string | null; name: string } | undefined {
+  const db = getDb();
+  const row = db.prepare('SELECT id, username, password_hash, name FROM students WHERE username = ?').get(username) as any;
+  return row ? { id: row.id, username: row.username, password_hash: row.password_hash, name: row.name } : undefined;
+}
+
+// 按 phone 查询学生(电话登录预留)
+export function findStudentByPhone(phone: string): { id: number; phone: string; name: string } | undefined {
+  const db = getDb();
+  const row = db.prepare('SELECT id, phone, name FROM students WHERE phone = ?').get(phone) as any;
+  return row ? { id: row.id, phone: row.phone, name: row.name } : undefined;
+}
+
+// 按 id 查询学生基本信息
+export function findStudentById(id: number): { id: number; name: string; username: string | null; phone: string | null } | undefined {
+  const db = getDb();
+  const row = db.prepare('SELECT id, name, username, phone FROM students WHERE id = ?').get(id) as any;
+  return row ? { id: row.id, name: row.name, username: row.username, phone: row.phone } : undefined;
+}
+
+// 创建新学生(注册),返回新学生 id。username 可选(为电话注册预留)
+export function createStudent(opts: { name?: string; username?: string; passwordHash?: string; phone?: string }): number {
+  const db = getDb();
+  const info = db.prepare(`
+    INSERT INTO students (name, username, password_hash, phone)
+    VALUES (?, ?, ?, ?)
+  `).run(opts.name || '学生', opts.username ?? null, opts.passwordHash ?? null, opts.phone ?? null);
+  return Number(info.lastInsertRowid);
+}
+
+// 更新学生 phone 字段(为电话绑定/换号预留)
+export function updateStudentPhone(id: number, phone: string): void {
+  const db = getDb();
+  db.prepare('UPDATE students SET phone = ? WHERE id = ?').run(phone, id);
 }
 
 // 事务辅助(node:sqlite 无内置 transaction 方法)

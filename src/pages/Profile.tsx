@@ -1,16 +1,20 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { getProfile } from "@/lib/api";
 import SubjectSwitcher from "@/components/SubjectSwitcher";
 import { useSubjectStore } from "@/store/subject";
+import { useAuthStore } from "@/store/auth";
 import { SUBJECT_LABELS } from "@/types";
 import type { ProfileData } from "@/types";
 import RadarChart from "@/components/RadarChart";
-import { PenLine, AlertCircle, Flame, Target, Radar as RadarIcon } from "lucide-react";
+import { PenLine, AlertCircle, Flame, Target, Radar as RadarIcon, LogIn, LogOut, UserCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export default function Profile() {
   const { subject } = useSubjectStore();
   const [profile, setProfile] = useState<ProfileData | null>(null);
+  const { user, clearAuth } = useAuthStore();
+  const navigate = useNavigate();
 
   useEffect(() => {
     getProfile(subject).then(setProfile).catch(console.error);
@@ -27,12 +31,55 @@ export default function Profile() {
 
   const radarData = profile.weakTags.slice(0, 6).map(t => ({ name: t.name, value: t.weight }));
 
+  function handleLogout() {
+    clearAuth();
+    // 退出后留在当前页,以游客身份继续
+    window.location.reload();
+  }
+
   return (
     <div className="px-5 pt-12 pb-6 space-y-6">
       <header>
         <h1 className="text-2xl font-serif font-bold text-ink-700">{SUBJECT_LABELS[subject]}学习画像</h1>
         <p className="text-sm text-ink-400 mt-0.5">你的{SUBJECT_LABELS[subject]}知识掌握全景</p>
       </header>
+
+      {/* 账号卡片 */}
+      <section className="rounded-2xl bg-gradient-to-br from-indigo-50 to-blue-50 border border-indigo-100 p-4 flex items-center gap-3">
+        <div className="w-12 h-12 rounded-full bg-indigo-600 text-white flex items-center justify-center">
+          <UserCircle size={28} />
+        </div>
+        <div className="flex-1 min-w-0">
+          {user ? (
+            <>
+              <p className="text-sm font-bold text-ink-700 truncate">{user.name}</p>
+              <p className="text-xs text-ink-400 truncate">
+                {user.username ? `账号: ${user.username}` : '已登录'}
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="text-sm font-bold text-ink-700">游客模式</p>
+              <p className="text-xs text-ink-400">数据保存在本机,登录后可云端同步</p>
+            </>
+          )}
+        </div>
+        {user ? (
+          <button
+            onClick={handleLogout}
+            className="flex items-center gap-1 px-3 py-1.5 rounded-pill text-xs font-medium text-pen-600 bg-pen-50 hover:bg-pen-100 transition"
+          >
+            <LogOut size={14} /> 退出
+          </button>
+        ) : (
+          <button
+            onClick={() => navigate('/login')}
+            className="flex items-center gap-1 px-3 py-1.5 rounded-pill text-xs font-medium text-white bg-indigo-600 hover:bg-indigo-700 transition"
+          >
+            <LogIn size={14} /> 登录
+          </button>
+        )}
+      </section>
 
       <SubjectSwitcher />
 
